@@ -1,0 +1,21 @@
+{
+    "manifest_version": 3,
+    "name": "Collector Extension",
+    "description": "Extension for TCG collectors",
+    "version": "1.0",
+    "action": {
+        "default_popup": "collector.html",
+        "default_icon": "src/img/lapras.webp"
+    },
+    "content_scripts": [
+        {
+            "js": [
+                "scripts/content.js"
+            ],
+            "matches": [
+                "https://developer.chrome.com/docs/extensions/*",
+                "https://developer.chrome.com/docs/webstore/*"
+            ]
+        }
+    ]
+}
