@@ -1,0 +1,1 @@
+This extension reads your card collection from pokellector.com so it can detect easily which cards you have on other websites, usually websites that sell these cards

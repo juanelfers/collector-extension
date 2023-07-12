@@ -1,3 +1,19 @@
 console.log('popup.js')
 
-document.querySelector('h1').innerText = 'Hola Juan!';
+const table = document.querySelector('table tbody');
+
+chrome.storage.local.get(['collections']).then(({ collections }) => {
+    if (!collections) return;
+    
+    console.log({ collections });
+    Object.values(collections).forEach(collection => {
+        console.log({ collection });
+
+        const collectionRow = document.createElement('tr');
+        collectionRow.innerHTML = `
+            <td>${collection.name}</td>
+            <td>${collection.cardCount} / ${collection.cardQuantity}</td>
+        `;
+        table.appendChild(collectionRow);
+    });
+});

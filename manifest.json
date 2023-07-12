@@ -7,14 +7,23 @@
         "default_popup": "collector.html",
         "default_icon": "src/img/lapras.webp"
     },
-    "content_scripts": [
-        {
-            "js": [
-                "scripts/content.js"
-            ],
-            "matches": [
-                "https://www.pokellector.com/*"
-            ]
-        }
-    ]
+    "permissions": [
+        "storage"
+    ],
+    "content_scripts": [{
+        "matches": ["*://*/*"],
+        "js": ["scripts/lib/storage.js"]
+    }, {
+        "matches": ["https://www.pokellector.com/*"],
+        "js": ["scripts/controllers/pokellector.js"]
+    }, {
+        "matches": ["https://www.misatocomics.com.ar/*"],
+        "js": ["scripts/controllers/misatocomics.js"]
+    }, {
+        "matches": ["https://www.magiclair.com.ar/*"],
+        "js": ["scripts/controllers/magiclair.js"]
+    }, {
+        "matches": ["https://www.pokemoncard.com.ar/*"],
+        "js": ["scripts/controllers/pokemoncard.js"]
+    }]
 }
