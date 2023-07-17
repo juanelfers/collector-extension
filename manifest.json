@@ -8,11 +8,16 @@
         "default_icon": "src/img/lapras.webp"
     },
     "permissions": [
-        "storage"
+        "storage",
+        "tabs",
+        "scripting"
     ],
+    "background": {
+        "service_worker": "scripts/lib/service-worker.js"
+    },
     "content_scripts": [{
         "matches": ["*://*/*"],
-        "js": ["scripts/lib/storage.js"]
+        "js": ["scripts/lib/storage.js", "scripts/controllers/tcg-premium.js"]
     }, {
         "matches": ["https://www.pokellector.com/*"],
         "js": ["scripts/controllers/pokellector.js"]
@@ -23,7 +28,7 @@
         "matches": ["https://www.magiclair.com.ar/*"],
         "js": ["scripts/controllers/magiclair.js"]
     }, {
-        "matches": ["https://www.pokemoncard.com.ar/*"],
+        "matches": ["https://www.pokemoncard.com.ar/*", "https://pokemoncard.com.ar/*"],
         "js": ["scripts/controllers/pokemoncard.js"]
     }]
 }

@@ -18,16 +18,18 @@ const Pokellector = {
         let cardCount = 0;
         const cardList = Array.from(document.querySelectorAll(this.cardContainer)).map(card => {
             const hasCard = card.classList.contains('checked');
-            const [cardNumber, cardName] = card.querySelector('.plaque').innerText.split(' - ');
-            const cardImage = card.querySelector('img').src;
+            const [number, name] = (([number, name]) => [number.slice(1), name])(card.querySelector('.plaque').innerText.split(' - '));
+            const image = card.querySelector('img').dataset.src;
+            const link = card.querySelector('a').href;
 
             if (hasCard) cardCount++;
 
             return {
-                cardNumber,
-                cardName,
-                cardImage,
-                hasCard
+                number,
+                name,
+                link,
+                image,
+                hasCard,
             };
         });
 

@@ -1,15 +1,17 @@
 const Storage = {
     language: 'spanish',
+    events: {
+        newData: []
+    },
 
     init() {
 
     },
 
-    get() {
-        return chrome.storage.local.get(['collections']).then(({ collections }) => {
-            this.collections = collections || {};
-            return this.collections;
-        })
+    async get(callback = () => { }) {
+        this.collections = (await chrome.storage.local.get(['collections'])).collections || {};
+        callback(this.collections);
+        return this.collections;
     },
 
     save(collection) {
@@ -37,6 +39,7 @@ const Storage = {
 
     findCard({ name, number, collectionCount }) {
         const { collections } = this;
+        let foundCard;
 
         const collectionsMatch = Object.values(collections).filter((collection) => {
             const quantityMatch = collection.cardQuantity === collectionCount;
@@ -46,7 +49,7 @@ const Storage = {
         collectionsMatch.forEach((collection) => {
             const possibleCard = collection.cardList[number - 1];
 
-            if (possibleCard.cardName.trim().toLowerCase() === name.trim().toLowerCase()) {
+            if ((possibleCard.name || possibleCard.cardName).trim().toLowerCase() === name.trim().toLowerCase()) {
                 foundCard = possibleCard;
             }
         });
@@ -59,7 +62,19 @@ const Storage = {
         }
 
         return foundCard;
+    },
+
+    on(event, callback) {
+        this.events[event].push(callback);
+    },
+
+    off(event, callback) {
+        this.events[event] = this.events[event].filter(cb => cb !== callback);
     }
 };
 
 Storage.init();
+
+window.collectorExtension = {
+    Storage
+};
