@@ -22,7 +22,16 @@ const Storage = {
 
             // if (!confirm(this.getMessage('confirmSave', { collectionName: collection.name }))) return;
 
-            collections[collection.name] = collection;
+            // Create it
+            if (!collections[collection.name]) {
+                collections[collection.name] = collection;
+            }
+            else {
+                collections[collection.name] = {
+                    ...collections[collection.name],
+                    ...collection
+                };
+            }
 
             chrome.storage.local.set({ collections }).then((newValue) => {
                 console.log("Value is set", newValue);
@@ -49,7 +58,8 @@ const Storage = {
         collectionsMatch.forEach((collection) => {
             const possibleCard = collection.cardList[number - 1];
 
-            if ((possibleCard.name || possibleCard.cardName).trim().toLowerCase() === name.trim().toLowerCase()) {
+            console.log(possibleCard.name, name)
+            if (this.normalizeName(possibleCard.name) === this.normalizeName(name)) {
                 foundCard = possibleCard;
             }
         });
@@ -70,6 +80,10 @@ const Storage = {
 
     off(event, callback) {
         this.events[event] = this.events[event].filter(cb => cb !== callback);
+    },
+
+    normalizeName(name) {
+        return name.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     }
 };
 

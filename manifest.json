@@ -17,7 +17,7 @@
     },
     "content_scripts": [{
         "matches": ["*://*/*"],
-        "js": ["scripts/lib/storage.js", "scripts/controllers/tcg-premium.js"]
+        "js": ["scripts/lib/storage.js", "scripts/lib/manipulator.js", "scripts/controllers/tcg-premium.js"]
     }, {
         "matches": ["https://www.pokellector.com/*"],
         "js": ["scripts/controllers/pokellector.js"]

@@ -9,24 +9,47 @@ const TCGPremium = {
     handleMessage() {
         const { data } = event;
 
-        if (data.event === 'pageReady') {
-            this.showData();
+        switch (data.event) {
+            case 'pageReady':
+                this.showData();
+                break;
+
+            case 'updateCollectionFront':
+                this.updateCollectionFront(data.collection, data.card);
+                break;
+
+            case 'updateCollectionDateAndGroup':
+                this.updateCollectionDateAndGroup(data.collection, data.date, data.group);
+                break;
         }
     },
 
-    showData() {
-        Storage.get().then(collections => {
-            this.sendCollections(collections)
-        })
+    async showData() {
+        const collections = await Storage.get();
+        this.sendCollections(collections)
+    },
+
+    async updateCollectionDateAndGroup(collection, date, group) {
+        const collections = await Storage.get();
+        collections[collection].date = date;
+        collections[collection].group = group;
+        Storage.save(collections[collection]);
+    },
+
+    async updateCollectionFront(collection, card) {
+        const collections = await Storage.get();        
+        collections[collection].frontPage = card;
+        Storage.save(collections[collection]);
     },
 
     sendCollections(collections) {
         try {
             window.postMessage({
                 target: 'tcg-premium-admin',
+                event: 'collections',
                 collections
             });
-        } catch {}
+        } catch { }
     }
 };
 
