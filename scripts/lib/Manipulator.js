@@ -6,7 +6,6 @@ const Manipulator = {
         this.config = config;
         this.collections = await Storage.get();
         this.checkCards();
-        console.log('checked')
         this.appendCSS();
     },
 
@@ -50,9 +49,9 @@ const Manipulator = {
         const button = document.createElement('button');
         const newCards = unknown.length + notHas.length;
         const message = newCards
-            ? newCards + ` nuevas cartas encontradas!` + button
+            ? newCards + ` nuevas cartas encontradas!`
             : unknown.length
-                ? unknown.length + ` cartas desconocidas encontradas` + button
+                ? unknown.length + ` cartas desconocidas encontradas`
                 : has.length + ` cartas repetidas encontradas`;
         const summary = document.createElement('div');
         summary.innerHTML = message;
@@ -66,7 +65,7 @@ const Manipulator = {
         try {
             const [name] = title.split(/ – | \(/) // .match(/([\w ]+\w)/)[0];
             const [number, collectionCount] = (([n, c]) => [+n.match(/\d+/)[0], +c.match(/\d+/)[0]])(title.match(/\w{0,2}\d+\/\w{0,2}\d+/)[0].split('/'));
-            console.log({name, number, collectionCount})
+            console.log({ name, number, collectionCount })
             return this.fixCard({ card, title }, { name, number, collectionCount });
         } catch (error) {
             console.warn('Error on reading card info', error);
@@ -79,13 +78,13 @@ const Manipulator = {
 
         container.classList.add(!foundCard
             ? 'missing-card' : foundCard.hasCard
-            ? 'has-card'
-            : 'not-has-card'
+                ? 'has-card'
+                : 'not-has-card'
         );
 
         const text = !foundCard
             ? 'Missing info' : foundCard.hasCard
-            ? 'Repetida' : 'Buy!'
+                ? 'Repetida' : 'Buy!'
         this.addTag(container, text);
 
         return { card, info: foundCard };

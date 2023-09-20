@@ -7,9 +7,15 @@ const Pokellector = {
         const collection = this.checkCollection();
         collection && Storage.save(collection)
 
+        this.events()
+
         console.log({ location, collection });
     },
-    
+
+    events() {
+
+    },
+
     checkCollection() {
         const cards = document.querySelector('.cards');
 
