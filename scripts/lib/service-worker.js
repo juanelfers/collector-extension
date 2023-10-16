@@ -1,16 +1,19 @@
+// Listen to changes in storage
 chrome.storage.onChanged.addListener((...data) => {
     console.log('Storage changed', data);
 });
 
-console.log('Service worker');
 
-chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    console.log({tabs})
-    const message = {
-        action: 'setGlobalVariable',
-        variableName: 'miVariableGlobal',
-        variableValue: 'valor de la variable global',
-    };
+// Listen to Pokellextor changes
+chrome.webRequest.onCompleted.addListener(
+    (...details) => {
+        console.log('Details', details)
+        if (details[0].url !== "https://www.pokellector.com/ajax/controllers/collection") return;
 
-    // chrome.tabs.sendMessage(tabs[0].id, message);
-});
+        chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+            const [{ id }] = tabs;
+            chrome.tabs.sendMessage(id, { action: "updatedCollection", details });
+        });
+    },
+    { urls: ["<all_urls>"] }
+);

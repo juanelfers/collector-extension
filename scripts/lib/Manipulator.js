@@ -4,9 +4,21 @@ const Manipulator = {
 
     async init(config) {
         this.config = config;
+
+        if (!this.rightPage()) return;
+
         this.collections = await Storage.get();
         this.checkCards();
         this.appendCSS();
+
+        if (config.sortCards) this.sortCards();
+    },
+
+    rightPage() {
+        return (
+            document.querySelector(this.config.cardContainer) &&
+            document.querySelector(this.config.infoContainer)
+        )
     },
 
     appendCSS() {
@@ -37,6 +49,8 @@ const Manipulator = {
     },
 
     checkCards() {
+        const infoContainer = document.querySelector(this.config.infoContainer);
+
         const allCards = document.querySelectorAll(this.config.cardContainer);
         const data = Array.from(allCards).map(this.processCard.bind(this));
 
@@ -44,9 +58,6 @@ const Manipulator = {
         const has = data.filter(({ info }) => info && info.hasCard);
         const notHas = data.filter(({ info }) => info && !info.hasCard);
 
-        console.log({ unknown, has, notHas });
-
-        const button = document.createElement('button');
         const newCards = unknown.length + notHas.length;
         const message = newCards
             ? newCards + ` nuevas cartas encontradas!`
@@ -56,16 +67,14 @@ const Manipulator = {
         const summary = document.createElement('div');
         summary.innerHTML = message;
 
-        document.querySelector(this.config.infoContainer).prepend(summary);
+        infoContainer.prepend(summary);
     },
 
     processCard(card) {
         const title = card.querySelector(this.config.cardTitle).innerText;
-        console.log({ card })
         try {
-            const [name] = title.split(/ – | \(/) // .match(/([\w ]+\w)/)[0];
+            const [name] = title.split(/ – | \(/);
             const [number, collectionCount] = (([n, c]) => [+n.match(/\d+/)[0], +c.match(/\d+/)[0]])(title.match(/\w{0,2}\d+\/\w{0,2}\d+/)[0].split('/'));
-            console.log({ name, number, collectionCount })
             return this.fixCard({ card, title }, { name, number, collectionCount });
         } catch (error) {
             console.warn('Error on reading card info', error);
@@ -91,17 +100,24 @@ const Manipulator = {
     },
 
     addTag(container, text) {
-        // const link = document.createElement('a');
-        // link.href = foundCard.link;
-        // link.innerHTML = foundCard.link;
-        // link.target = '_blank';
-        // container.appendChild(link);
-
-        // 
         container.style.position = 'relative';
         const div = document.createElement('div');
         div.classList.add('tag');
         div.innerHTML = text;
         container.appendChild(div);
+    },
+
+    sortCards() {
+        const grid = document.querySelector(this.config.cardsContainer);
+        const elems = Array.from(document.querySelectorAll(this.config.cardContainer));
+        grid.innerHTML = '';
+
+        const has = card => card.classList.contains('has-card')
+        elems.sort((a, b) => {
+            if (has(a)) return 1
+            if (has(b)) return -1
+            return num(a) > num(b) ? 1 : -1;
+        })
+        elems.forEach(e => grid.appendChild(e))
     }
 };

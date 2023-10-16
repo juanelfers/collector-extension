@@ -10,7 +10,11 @@
     "permissions": [
         "storage",
         "tabs",
-        "scripting"
+        "scripting",
+        "webRequest"
+    ],
+    "host_permissions": [
+        "https://www.pokellector.com/*"
     ],
     "background": {
         "service_worker": "scripts/lib/service-worker.js"

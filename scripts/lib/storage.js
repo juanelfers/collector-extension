@@ -16,7 +16,6 @@ const Storage = {
 
     save(collection) {
         this.get().then((collections) => {
-            console.log('Collections', collections);
 
             if (!this.hasChanged(collection, collections)) return;
 
@@ -33,9 +32,7 @@ const Storage = {
                 };
             }
 
-            chrome.storage.local.set({ collections }).then((newValue) => {
-                console.log("Value is set", newValue);
-            });
+            chrome.storage.local.set({ collections }).then((newValue) => {});
         });
     },
 
@@ -58,7 +55,6 @@ const Storage = {
         collectionsMatch.forEach((collection) => {
             const possibleCard = collection.cardList[number - 1];
 
-            console.log(possibleCard.name, name)
             if (this.normalizeName(possibleCard.name) === this.normalizeName(name)) {
                 foundCard = possibleCard;
             }

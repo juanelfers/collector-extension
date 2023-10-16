@@ -1,34 +1,26 @@
-(async () => {
-    const num = elem => {
-        const title = elem.querySelector('.grid-view-item__title').innerText;
-        const num = title.match(/\d+\/\d+/);
-        if (!num) {
-            return Infinity
-        }
-        return num[0].split('/')[0]
-    };
-
-    const grid = document.querySelector('#main-collection-product-grid');
-    if (!grid) return;
-
-    await Manipulator.init({
-        cardContainer: '#main-collection-product-grid li',
-        cardTitle: '.grid-view-item__title',
-        infoContainer: '.normal_main_content'
-    });
-
-    const elems = Array.from(grid.querySelectorAll('li'));
-    grid.innerHTML = '';
-    elems.sort((a, b) => a.classList.contains('has-card') ? 1 : (num(a) > num(b) ? 1 : -1))
-    elems.forEach(e => grid.appendChild(e))
-})();
+const num = elem => {
+    const title = elem.querySelector('.grid-view-item__title').innerText;
+    const num = title.match(/\d+\/\d+/);
+    if (!num) {
+        return Infinity
+    }
+    return num[0].split('/')[0]
+};
 
 const PokemonCard = {
     init() {
-        setTimeout(() => {
-            this.events();
-            this.pagination();
-        }, 1000)
+        const config = {
+            cardsContainer: '#main-collection-product-grid',
+            cardContainer: '#main-collection-product-grid li',
+            cardTitle: '.grid-view-item__title',
+            infoContainer: '.normal_main_content',
+            sortCards: true
+        };
+
+        Manipulator.init(config);
+
+        this.events();
+        this.pagination();
     },
 
     events() {

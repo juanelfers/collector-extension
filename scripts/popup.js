@@ -1,13 +1,9 @@
-console.log('popup.js')
-
 const table = document.querySelector('table tbody');
 
 chrome.storage.local.get(['collections']).then(({ collections }) => {
     if (!collections) return;
     
-    console.log({ collections });
     Object.values(collections).forEach(collection => {
-        console.log({ collection });
 
         const collectionRow = document.createElement('tr');
         collectionRow.innerHTML = `

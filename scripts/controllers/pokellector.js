@@ -3,17 +3,21 @@ const Pokellector = {
     language: 'spanish',
 
     init() {
-        const { location } = window;
-        const collection = this.checkCollection();
-        collection && Storage.save(collection)
-
-        this.events()
-
-        console.log({ location, collection });
+        this.checkAndSave();
+        this.events();
     },
 
     events() {
+        chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+            if (request.action === "updatedCollection") {
+                this.checkAndSave();
+            }
+        });
+    },
 
+    checkAndSave() {
+        const collection = this.checkCollection();
+        collection && Storage.save(collection);
     },
 
     checkCollection() {
@@ -23,7 +27,7 @@ const Pokellector = {
 
         let cardCount = 0;
         const cardList = Array.from(document.querySelectorAll(this.cardContainer)).map(card => {
-            const hasCard = card.classList.contains('checked');
+            const hasCard = card.querySelector('.checkbox').getAttribute('checked') !== null;
             const [number, name] = (([number, name]) => [number.slice(1), name])(card.querySelector('.plaque').innerText.split(' - '));
             const image = card.querySelector('img').dataset.src;
             const link = card.querySelector('a').href;
@@ -39,7 +43,7 @@ const Pokellector = {
             };
         });
 
-        const name = document.querySelector('#siteBody h1').textContent;
+        const name = this.nameExceptions(document.querySelector('#siteBody h1').textContent);
         const cardQuantity = +document.querySelectorAll('.cards')?.[0]?.innerText.match(/[0-9]+/)[0];
         const secretCardQuantity = cardList.length - cardQuantity;
 
@@ -59,6 +63,11 @@ const Pokellector = {
                 spanish: `Desea actualizar la lista para la colección ${data.collectionName}?`,
             }
         }[message][this.language];
+    },
+
+    nameExceptions(name) {
+        return name
+            .replace('Scarlet & Violet - 151', '151')
     }
 };
 
