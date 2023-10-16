@@ -38,7 +38,9 @@ const PokemonCard = {
 
     pagination() {
         const parts = document.querySelector('.pagination-block .parts');
-        const pages = document.querySelector('.pagination-block .parts').children;
+        if (!parts) return;
+
+        const pages = parts.children;
         const lastPage = pages[pages.length - 1]
         const lastPageNumber = +lastPage.innerText;
         const originalHref = lastPage.href;
