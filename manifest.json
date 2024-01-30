@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
     "name": "Collector Extension",
-    "description": "Extension for TCG collectors",
-    "version": "1.0",
+    "description": "Extension for Pokemon TCG Collectors",
+    "version": "1.0.1",
     "action": {
         "default_popup": "collector.html",
         "default_icon": "src/img/lapras.webp"
@@ -10,6 +10,7 @@
     "permissions": [
         "storage",
         "tabs",
+        "activeTab",
         "scripting",
         "webRequest"
     ],
@@ -20,7 +21,14 @@
         "service_worker": "scripts/lib/service-worker.js"
     },
     "content_scripts": [{
-        "matches": ["*://*/*"],
+        "matches": [
+            "http://localhost:3000/*",
+            "https://www.pokellector.com/*",
+            "https://www.misatocomics.com.ar/*",
+            "https://www.magiclair.com.ar/*",
+            "https://www.pokemoncard.com.ar/*",
+            "https://pokemoncard.com.ar/*"
+        ],
         "js": ["scripts/lib/storage.js", "scripts/lib/manipulator.js", "scripts/controllers/tcg-premium.js"]
     }, {
         "matches": ["https://www.pokellector.com/*"],

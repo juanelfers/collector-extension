@@ -52,7 +52,7 @@ const Manipulator = {
         const infoContainer = document.querySelector(this.config.infoContainer);
 
         const allCards = document.querySelectorAll(this.config.cardContainer);
-        const data = Array.from(allCards).map(this.processCard.bind(this));
+        const data = Array.from(allCards).map(this.processCard.bind(this)).filter(Boolean);
 
         const unknown = data.filter(({ info }) => !info);
         const has = data.filter(({ info }) => info && info.hasCard);
@@ -71,7 +71,9 @@ const Manipulator = {
     },
 
     processCard(card) {
-        const title = card.querySelector(this.config.cardTitle).innerText;
+        const title = card.querySelector(this.config.cardTitle)?.innerText;
+        if (!title) return;
+        
         try {
             const [name] = title.split(/ – | \(/);
             const [number, collectionCount] = (([n, c]) => [+n.match(/\d+/)[0], +c.match(/\d+/)[0]])(title.match(/\w{0,2}\d+\/\w{0,2}\d+/)[0].split('/'));

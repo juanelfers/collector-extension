@@ -1,7 +1,7 @@
 const TCGPremium = {
     init() {
         window.addEventListener('message', (event) => {
-            if (event.data.target !== 'tcg-premium') return;
+            if (event.data.target !== 'tcg-premium-extension') return;
             this.handleMessage(event);
         });
     },
@@ -11,7 +11,7 @@ const TCGPremium = {
 
         switch (data.event) {
             case 'pageReady':
-                this.showData();
+                this.pageReady();
                 break;
 
             case 'updateCollectionFront':
@@ -24,9 +24,9 @@ const TCGPremium = {
         }
     },
 
-    async showData() {
+    async pageReady() {
         const collections = await Storage.get();
-        this.sendCollections(collections)
+        this.sendCollections(collections);
     },
 
     async updateCollectionDateAndGroup(collection, date, group) {
