@@ -1,23 +1,12 @@
-const num = elem => {
-    const title = elem.querySelector('.grid-view-item__title').innerText;
-    const num = title.match(/\d+\/\d+/);
-    if (!num) {
-        return Infinity
-    }
-    return num[0].split('/')[0]
-};
-
 const PokemonCard = {
     init() {
-        const config = {
+        Manipulator.init({
             cardsContainer: '#main-collection-product-grid',
             cardContainer: '#main-collection-product-grid li',
             cardTitle: '.grid-view-item__title',
             infoContainer: '.normal_main_content',
             sortCards: true
-        };
-
-        Manipulator.init(config);
+        });
 
         this.events();
         this.pagination();

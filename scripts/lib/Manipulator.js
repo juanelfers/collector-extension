@@ -39,10 +39,14 @@ const Manipulator = {
                 background: #39F;
             }
             .missing-card .tag {
-                background: #F63;
+                background: #C30;
             }
             .has-card {
                 filter: grayscale(1);
+                transition: .3s filter;
+            }
+            .has-card:hover {
+                filter: grayscale(0);
             }
         `;
         document.body.appendChild(css);

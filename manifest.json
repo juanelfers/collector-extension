@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "Collector Extension",
     "description": "Extension for Pokemon TCG Collectors",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "action": {
         "default_popup": "collector.html",
         "default_icon": "src/img/lapras.webp"
@@ -27,7 +27,8 @@
             "https://www.misatocomics.com.ar/*",
             "https://www.magiclair.com.ar/*",
             "https://www.pokemoncard.com.ar/*",
-            "https://pokemoncard.com.ar/*"
+            "https://pokemoncard.com.ar/*",
+            "https://www.trollandtoad.com/pokemon/*"
         ],
         "js": ["scripts/lib/storage.js", "scripts/lib/manipulator.js", "scripts/controllers/tcg-premium.js"]
     }, {
@@ -42,5 +43,8 @@
     }, {
         "matches": ["https://www.pokemoncard.com.ar/*", "https://pokemoncard.com.ar/*"],
         "js": ["scripts/controllers/pokemoncard.js"]
+    }, {
+        "matches": ["https://www.trollandtoad.com/pokemon/*"],
+        "js": ["scripts/controllers/trollandtoad.js"]
     }]
 }

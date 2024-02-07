@@ -15,6 +15,7 @@ chrome.webRequest.onCompleted.addListener(
 );
 
 chrome.runtime.onInstalled.addListener(() => {
+    return;
     const urls = [
         'Scarlet-Violet-151',
         'Obsidian-Flames',
