@@ -1,3 +1,12 @@
+const getNum = elem => {
+    const title = elem.querySelector('.grid-view-item__title').innerText;
+    const num = title.match(/\d+\/\d+/);
+    if (!num) {
+        return Infinity
+    }
+    return num[0].split('/')[0]
+};
+
 const Manipulator = {
     count: 0,
     config: null,
@@ -122,7 +131,7 @@ const Manipulator = {
         elems.sort((a, b) => {
             if (has(a)) return 1
             if (has(b)) return -1
-            return num(a) > num(b) ? 1 : -1;
+            return getNum(a) > getNum(b) ? 1 : -1;
         })
         elems.forEach(e => grid.appendChild(e))
     }
