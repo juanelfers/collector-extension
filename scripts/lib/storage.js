@@ -55,7 +55,9 @@ const Storage = {
         collectionsMatch.forEach((collection) => {
             const possibleCard = collection.cardList[number - 1];
 
-            if (this.normalizeName(possibleCard.name) === this.normalizeName(name)) {
+            const n1 = this.normalizeName(possibleCard.name);
+            const n2 = this.normalizeName(name);
+            if (n1.includes(n2) || n2.includes(n1)) {
                 foundCard = possibleCard;
             }
         });
@@ -79,7 +81,7 @@ const Storage = {
     },
 
     normalizeName(name) {
-        return name.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return name.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s*\(lv\s+\d+\)\s*/, '');
     }
 };
 
