@@ -1,50 +1,52 @@
 {
-    "manifest_version": 3,
-    "name": "Collector Extension",
-    "description": "Extension for Pokemon TCG Collectors",
-    "version": "1.0.2",
-    "action": {
-        "default_popup": "collector.html",
-        "default_icon": "src/img/lapras.webp"
+  "manifest_version": 3,
+  "name": "PokeArgentum Extension",
+  "description": "Extensión para PokeArgentum",
+  "version": "0.0.1",
+  "action": {
+    "default_popup": "pokeargentum.html",
+    "default_icon": "src/img/lapras.webp"
+  },
+  "permissions": ["storage", "tabs", "activeTab", "scripting", "webRequest", "downloads"],
+  "host_permissions": ["https://www.pokellector.com/*"],
+  "background": {
+    "service_worker": "scripts/lib/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://fe.afip.gob.ar/*"],
+      "js": ["scripts/all.js"],
+      "run_at": "document_idle"
     },
-    "permissions": [
-        "storage",
-        "tabs",
-        "activeTab",
-        "scripting",
-        "webRequest"
-    ],
-    "host_permissions": [
-        "https://www.pokellector.com/*"
-    ],
-    "background": {
-        "service_worker": "scripts/lib/service-worker.js"
+    {
+      "matches": ["http://localhost:3000/*", "https://tcg-premium.vercel.app/*", "https://www.mercadolibre.com.ar/ventas/*", "https://www.pokeargentum.com/*"],
+      "js": ["scripts/lib/storage.js", "scripts/controllers/tcg-premium.js"],
+      "run_at": "document_start"
     },
-    "content_scripts": [{
-        "matches": [
-            "http://localhost:3000/*",
-            "https://www.pokellector.com/*",
-            "https://www.misatocomics.com.ar/*",
-            "https://www.magiclair.com.ar/*",
-            "https://www.pokemoncard.com.ar/*",
-            "https://pokemoncard.com.ar/*",
-            "https://www.trollandtoad.com/pokemon/*"
-        ],
-        "js": ["scripts/lib/storage.js", "scripts/lib/manipulator.js", "scripts/controllers/tcg-premium.js"]
-    }, {
-        "matches": ["https://www.pokellector.com/*"],
-        "js": ["scripts/controllers/pokellector.js"]
-    }, {
-        "matches": ["https://www.misatocomics.com.ar/*"],
-        "js": ["scripts/controllers/misatocomics.js"]
-    }, {
-        "matches": ["https://www.magiclair.com.ar/*"],
-        "js": ["scripts/controllers/magiclair.js"]
-    }, {
-        "matches": ["https://www.pokemoncard.com.ar/*", "https://pokemoncard.com.ar/*"],
-        "js": ["scripts/controllers/pokemoncard.js"]
-    }, {
-        "matches": ["https://www.trollandtoad.com/pokemon/*"],
-        "js": ["scripts/controllers/trollandtoad.js"]
-    }]
+    {
+      "matches": ["https://www.correoargentino.com.ar/MiCorreo/public/envioCla"],
+      "js": ["scripts/correoArgentino.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.mercadolibre.com.ar/ventas/*"],
+      "js": ["scripts/controllers/sales.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.mercadopago.com.ar/tools/home-one-shot"],
+      "js": ["scripts/controllers/mp.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://pymes.andreani.com/hacer-envio/*"],
+      "js": ["scripts/andreani.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.mercadopago.com.ar/link-tools/congrats/*"],
+      "js": ["scripts/controllers/mercadopago.js"],
+      "run_at": "document_end"
+    }
+  ]
 }
