@@ -8,42 +8,71 @@ const $ = selector => document.querySelector(selector);
 
 const getData = event => JSON.parse(event.clipboardData.getData('text'));
 
+const normalize = str => (str || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+
+// CABA llega como "Ciudad Autónoma de Buenos Aires" pero en el form de Correo es "CAPITAL FEDERAL".
+const provinceAliases = {
+    'ciudad autonoma de buenos aires': 'capital federal',
+    'caba': 'capital federal',
+};
+
+// Selecciona la provincia matcheando por nombre (el value del option es una letra: B, C, K...)
+// y dispara change: necesario para domicilio y, en sucursal, para que el form cargue las sucursales.
+const selectProvince = (selectEl, provinceName) => {
+    if (!selectEl) return;
+    const target = provinceAliases[normalize(provinceName)] || normalize(provinceName);
+    const option = Array.from(selectEl.children).find(o => normalize(o.innerText) === target);
+    if (!option) return;
+    selectEl.value = option.value;
+    triggerChange(selectEl);
+};
+
+const fillInputs = inputs => {
+    inputs.forEach(([id, value]) => {
+        const input = $(`#${id}`);
+        if (!input) return;
+        input.value = value;
+        triggerChange(input);
+    });
+};
+
 const pasteShippingData = data => {
     const { customer, address, ...order } = data;
     const codArea = address.phone.slice(-10, -8);
     const phone = address.phone.slice(-8);
     const inBetween = address.between_streets ? `Entre ${address.between_streets}` : '';
 
-    const inputs = [
-        ['tipoEntrega', 'domicilio'],
-        ['cpCpa', address.postal_code],
-        ['nars', `${customer.first_name} ${customer.last_name}`],
-        ['correoElectronico', customer.email],
-        ['codAreaPaqDom', codArea],
-        ['celularPaqDom', phone],
-        ['provincia', address.province],
-        ['localidad', address.city],
-        ['observaciones', inBetween || '' + order.comments || ''],
-        ['direCompleta', `${address.street_address} ${address.floor_apartment || ''}`],
-    ];
+    const name = `${customer.first_name} ${customer.last_name}`;
+    const isBranch = order.shipping_modality === 'branch';
 
-    inputs.forEach(([id, value]) => {
-        const input = $(`#${id}`);
-        console.log({ input, value })
+    // Primero el tipo de entrega: el form muestra/oculta el grupo de campos correspondiente.
+    fillInputs([['tipoEntrega', isBranch ? 'sucursal' : 'domicilio']]);
 
-        if (!input) return;
-
-        input.value = value;
-        triggerChange(input);
-    });
-
-    const province = address.province.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-    Array.from($(`#provincia`).children).forEach(option => {
-        if (option.innerText.toLowerCase() === province) {
-            $(`#provincia`).value = option.value;
-        }
-    });
+    if (isBranch) {
+        // Entrega en sucursal: el form usa IDs con sufijo 2 / Suc.
+        // sucursalDestino2 NO se completa: se llena dinámicamente al elegir la provincia y el
+        // pedido solo trae la dirección del cliente (sucursal más cercana), así que la elegís a mano.
+        fillInputs([
+            ['nars2', name],
+            ['correoElectronico2', customer.email],
+            ['codAreaPaqSuc', codArea],
+            ['celularPaqSuc', phone],
+        ]);
+        selectProvince($('#provincia2'), address.province);
+    } else {
+        // Entrega a domicilio.
+        fillInputs([
+            ['cpCpa', address.postal_code],
+            ['nars', name],
+            ['correoElectronico', customer.email],
+            ['codAreaPaqDom', codArea],
+            ['celularPaqDom', phone],
+            ['localidad', address.city],
+            ['observaciones', [inBetween, order.comments].filter(Boolean).join('. ')],
+            ['direCompleta', `${address.street_address} ${address.floor_apartment || ''}`],
+        ]);
+        selectProvince($('#provincia'), address.province);
+    }
 };
 
 const pastePackageData = data => {
