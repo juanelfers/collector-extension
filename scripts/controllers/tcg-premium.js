@@ -19,6 +19,12 @@ const TCGPremium = {
             case 'getInvoiceResults':
                 this.sendInvoiceResults();
                 break;
+            case 'getInvoicePdfs':
+                this.sendInvoicePdfs();
+                break;
+            case 'startMlUpload':
+                this.startMlUpload();
+                break;
         }
     },
 
@@ -48,6 +54,46 @@ const TCGPremium = {
                 target: 'tcg-premium-admin',
                 event: 'invoiceQueueLoaded',
                 count: queue.length
+            });
+        } catch { }
+    },
+
+    // PDFs capturados por el driver de ARCA, pendientes de subir a ML.
+    async pendingPdfIds() {
+        const { invoicePdfs = {} } = await chrome.storage.local.get('invoicePdfs');
+        return Object.keys(invoicePdfs).filter((id) => invoicePdfs[id]?.dataUrl && !invoicePdfs[id].uploaded);
+    },
+
+    async sendInvoicePdfs() {
+        const pending = await this.pendingPdfIds();
+        try {
+            window.postMessage({
+                target: 'tcg-premium-admin',
+                event: 'invoicePdfs',
+                pending
+            });
+        } catch { }
+    },
+
+    // El admin dispara la subida de facturas a ML: armamos la cola con todos
+    // los PDFs pendientes y abrimos la primera orden. De ahí en más el driver
+    // (ml-invoices.js) encadena solo, orden por orden.
+    async startMlUpload() {
+        const pending = await this.pendingPdfIds();
+        if (pending.length) {
+            await chrome.storage.local.set({
+                mlUpload: { active: true, queue: pending, results: [], attempts: {} }
+            });
+            chrome.runtime.sendMessage({
+                type: 'open-tab',
+                url: `https://vendedores.mercadolibre.com.ar/emisor/adjuntar-factura?orders_ids=${pending[0]}`
+            });
+        }
+        try {
+            window.postMessage({
+                target: 'tcg-premium-admin',
+                event: 'mlUploadStarted',
+                count: pending.length
             });
         } catch { }
     },

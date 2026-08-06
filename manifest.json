@@ -7,7 +7,7 @@
     "default_popup": "pokeargentum.html",
     "default_icon": "src/img/lapras.webp"
   },
-  "permissions": ["storage", "tabs", "activeTab", "scripting", "webRequest", "downloads"],
+  "permissions": ["storage", "unlimitedStorage", "tabs", "activeTab", "scripting", "webRequest", "downloads"],
   "host_permissions": ["https://www.pokellector.com/*"],
   "background": {
     "service_worker": "scripts/lib/service-worker.js"
@@ -22,6 +22,11 @@
       "matches": ["http://localhost:3000/*", "https://tcg-premium.vercel.app/*", "https://www.mercadolibre.com.ar/ventas/*", "https://pokeargentum.com/*", "https://www.pokeargentum.com/*", "https://konekotekka.com/*", "https://www.konekotekka.com/*"],
       "js": ["scripts/lib/storage.js", "scripts/controllers/tcg-premium.js"],
       "run_at": "document_start"
+    },
+    {
+      "matches": ["https://vendedores.mercadolibre.com.ar/emisor/*"],
+      "js": ["scripts/controllers/ml-invoices.js"],
+      "run_at": "document_idle"
     },
     {
       "matches": ["https://www.correoargentino.com.ar/MiCorreo/public/envioCla"],

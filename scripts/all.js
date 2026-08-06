@@ -250,11 +250,59 @@ async function stepResumen(inv, state) {
         return;
     }
 
-    // Estado post-generación: imprimir y pasar a la siguiente.
-    const printBtn = document.querySelector('#botones_comprobante input');
-    if (printBtn) printBtn.click();
-    await sleep(400);
+    // Estado post-generación: capturar el PDF y pasar a la siguiente.
+    // Plan A: fetch del PDF con la sesión de la página → bytes en storage (para
+    // el driver de ML) + descarga bien nombrada. Plan B: click en Imprimir como
+    // siempre, avisándole al service worker que renombre lo que baje.
+    const captured = await capturePdf(inv);
+    if (!captured) {
+        const printBtn = document.querySelector('#botones_comprobante input');
+        if (printBtn) {
+            try { chrome.runtime.sendMessage({ type: 'expect-afip-pdf', orderId: inv.orderId }); } catch { }
+            printBtn.click();
+            await sleep(1200); // que la descarga arranque antes de navegar
+        }
+    }
     await completeCurrent(state, inv, 'ok');
+}
+
+// Intenta bajar el PDF del comprobante recién generado SIN abrir otra pestaña:
+// el botón de imprimir lleva la URL en el onclick, y un fetch desde acá viaja
+// con las cookies de la sesión. Si sale, guardamos el base64 en
+// chrome.storage.local (key `invoicePdfs`) para que el driver de ML lo suba
+// después, y de paso lo descargamos como facturas-arca/{orderId}.pdf.
+// TO-VERIFY: la forma exacta del onclick en el sitio real.
+async function capturePdf(inv) {
+    try {
+        const btn = document.querySelector('#botones_comprobante input');
+        const onclick = btn?.getAttribute('onclick') || '';
+        const m = onclick.match(/['"]([^'"]+)['"]/);
+        if (!m) return false;
+        const url = new URL(m[1], location.href).href;
+        const res = await fetch(url, { credentials: 'include' });
+        if (!res.ok) return false;
+        const buf = await res.arrayBuffer();
+        // Magia %PDF al principio; si vino HTML (otra página intermedia), plan B.
+        const head = new Uint8Array(buf.slice(0, 4));
+        if (String.fromCharCode(...head) !== '%PDF') return false;
+
+        let bin = '';
+        const bytes = new Uint8Array(buf);
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+            bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        const dataUrl = `data:application/pdf;base64,${btoa(bin)}`;
+
+        const { invoicePdfs = {} } = await chrome.storage.local.get('invoicePdfs');
+        invoicePdfs[inv.orderId] = { dataUrl, at: Date.now(), uploaded: false };
+        await chrome.storage.local.set({ invoicePdfs });
+        chrome.runtime.sendMessage({ type: 'save-pdf', orderId: inv.orderId, dataUrl });
+        console.log('[PokeArgentum] PDF capturado', inv.orderId, `${Math.round(bytes.length / 1024)}KB`);
+        return true;
+    } catch (e) {
+        console.warn('[PokeArgentum] no se pudo capturar el PDF, uso Imprimir', e);
+        return false;
+    }
 }
 
 // ----------------------------------------------------- avanzar / terminar ----
