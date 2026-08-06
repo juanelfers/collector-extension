@@ -45,7 +45,7 @@ const TYPE_PROFILES = {
     A: { universoComprobante: '1', idivareceptor: '1' /* responsable inscripto — TO-VERIFY */, discriminaIva: true },
     C: { universoComprobante: '2', idivareceptor: null, discriminaIva: false, skipTypeSelect: true },
 };
-const IVA_21_ID = '5'; // id de alícuota 21% en AFIP — TO-VERIFY
+const IVA_21_ID = '5'; // id de alícuota 21% en AFIP (verificado en el DOM real)
 const CONSUMIDOR_FINAL_ID = '5'; // condición IVA del receptor cuando el doc es DNI
 
 // ---------------------------------------------------------------- helpers ----
@@ -224,15 +224,17 @@ async function stepOperacion(inv, cfg) {
     const total = Number(inv.total) || 0;
     const precio = document.querySelector('#detalle_precio1');
     if (profileFor(inv, cfg).discriminaIva) {
-        // Factura A: se carga el NETO; AFIP agrega el IVA. TO-VERIFY selectores.
-        const neto = total / 1.21;
-        setValue(precio, neto.toFixed(2));
-        const ivaSel = document.querySelector('#detalle_iva1, [name=detalle_iva1]');
-        if (ivaSel) setValue(ivaSel, IVA_21_ID);
+        // Factura A: se carga el NETO; AFIP agrega el IVA encima.
+        setValue(precio, (total / 1.21).toFixed(2));
     } else {
-        // Factura B y C: precio bruto, sin discriminar IVA.
+        // Factura B y C: precio bruto (IVA incluido).
         setValue(precio, total.toFixed(2));
     }
+    // Siendo RI la alícuota es obligatoria SIEMPRE, también en B (ahí ARCA la
+    // usa para calcular el IVA contenido, no lo suma). En C el select no existe
+    // y esto queda en no-op, así konekotekka sigue igual.
+    const ivaSel = document.querySelector('#detalle_tipo_iva1, [name=detalleTipoIVA]');
+    if (ivaSel) setValue(ivaSel, IVA_21_ID);
     clickContinue();
 }
 
