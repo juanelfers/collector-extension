@@ -8,6 +8,15 @@ const TCGPremium = {
     },
 
     handleMessage(event) {
+        // Si la extensión se recargó, este script quedó huérfano: window.* le
+        // sigue andando pero chrome.* tira "Extension context invalidated".
+        // Avisamos a la página para que pida un F5 en vez de fallar mudos.
+        if (!chrome.runtime?.id) {
+            try {
+                window.postMessage({ target: 'tcg-premium-admin', event: 'extensionStale' });
+            } catch { }
+            return;
+        }
         const { data } = event;
         switch (data.event) {
             case 'loadSales':
