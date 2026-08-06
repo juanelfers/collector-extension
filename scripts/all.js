@@ -248,7 +248,13 @@ async function stepResumen(inv, state) {
     }
 
     if (genBtn) {
-        genBtn.click(); // postback: la página recarga mostrando el comprobante
+        genBtn.click();
+        // "Confirmar Datos..." no navega: abre un modal jQuery UI ("Usted está
+        // por generar un nuevo comprobante. ¿Confirma la Operación?"). Como el
+        // script no se re-ejecuta sin navegación, el Confirmar hay que
+        // apretarlo desde acá. Recién ese click hace el postback al comprobante.
+        const confirmBtn = await waitForDialogConfirm();
+        confirmBtn?.click();
         return;
     }
 
@@ -266,6 +272,27 @@ async function stepResumen(inv, state) {
         }
     }
     await completeCurrent(state, inv, 'ok');
+}
+
+// Botón "Confirmar" del modal jQuery UI de generación (los botones no tienen
+// id: se matchea por texto exacto entre los visibles, para no agarrar el
+// "Cancelar" de al lado).
+function waitForDialogConfirm({ timeout = 6000 } = {}) {
+    return new Promise((resolve) => {
+        const start = Date.now();
+        const iv = setInterval(() => {
+            const btn = [...document.querySelectorAll('.ui-dialog .ui-dialog-buttonset button')]
+                .filter((b) => b.offsetParent !== null)
+                .find((b) => /^confirmar$/i.test((b.textContent || '').trim()));
+            if (btn) {
+                clearInterval(iv);
+                resolve(btn);
+            } else if (Date.now() - start > timeout) {
+                clearInterval(iv);
+                resolve(null); // sin modal: que el humano mire qué pasó
+            }
+        }, 150);
+    });
 }
 
 // Intenta bajar el PDF del comprobante recién generado SIN abrir otra pestaña:
