@@ -259,19 +259,11 @@ async function stepResumen(inv, state) {
     }
 
     // Estado post-generación: capturar el PDF y pasar a la siguiente.
-    // Plan A: fetch del PDF con la sesión de la página → bytes en storage (para
-    // el driver de ML) + descarga bien nombrada. Plan B: click en Imprimir como
-    // siempre, avisándole al service worker que renombre lo que baje.
+    // OJO: acá NUNCA hay que clickear "Imprimir": su onclick es
+    // parent.location.href = 'imprimirComprobante.do?c=' + idComprobante, o sea
+    // NAVEGA la pestaña al PDF y el batch muere ahí. El PDF se baja por fetch.
     const captured = await capturePdf(inv);
-    if (!captured) {
-        const printBtn = document.querySelector('#botones_comprobante input');
-        if (printBtn) {
-            try { chrome.runtime.sendMessage({ type: 'expect-afip-pdf', orderId: inv.orderId }); } catch { }
-            printBtn.click();
-            await sleep(1200); // que la descarga arranque antes de navegar
-        }
-    }
-    await completeCurrent(state, inv, 'ok');
+    await completeCurrent(state, inv, 'ok', captured ? null : 'Generada, pero no pude capturar el PDF');
 }
 
 // Botón "Confirmar" del modal jQuery UI de generación (los botones no tienen
@@ -295,19 +287,17 @@ function waitForDialogConfirm({ timeout = 6000 } = {}) {
     });
 }
 
-// Intenta bajar el PDF del comprobante recién generado SIN abrir otra pestaña:
-// el botón de imprimir lleva la URL en el onclick, y un fetch desde acá viaja
-// con las cookies de la sesión. Si sale, guardamos el base64 en
-// chrome.storage.local (key `invoicePdfs`) para que el driver de ML lo suba
-// después, y de paso lo descargamos como facturas-arca/{orderId}.pdf.
-// TO-VERIFY: la forma exacta del onclick en el sitio real.
+// Baja el PDF del comprobante recién generado SIN navegar: el onclick real del
+// botón es parent.location.href = 'imprimirComprobante.do?c=' + idComprobante
+// (visto en vivo), con idComprobante como global de la página. Lo pescamos del
+// HTML, armamos la URL nosotros y el fetch viaja con las cookies de la sesión.
+// El base64 queda en chrome.storage.local (key `invoicePdfs`) para que el
+// driver de ML lo suba, y de paso se descarga como facturas-arca/{orderId}.pdf.
 async function capturePdf(inv) {
     try {
-        const btn = document.querySelector('#botones_comprobante input');
-        const onclick = btn?.getAttribute('onclick') || '';
-        const m = onclick.match(/['"]([^'"]+)['"]/);
-        if (!m) return false;
-        const url = new URL(m[1], location.href).href;
+        const idm = document.documentElement.innerHTML.match(/idComprobante\s*=\s*['"]?(\d+)/);
+        if (!idm) return false;
+        const url = new URL(`imprimirComprobante.do?c=${idm[1]}`, location.href).href;
         const res = await fetch(url, { credentials: 'include' });
         if (!res.ok) return false;
         const buf = await res.arrayBuffer();
@@ -437,17 +427,27 @@ function renderDonePanel(state) {
     };
 }
 
-function renderUnknownPanel(state) {
+function renderUnknownPanel(state, inv) {
     const el = ensurePanel();
     el.innerHTML = `
         <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Esperando ARCA…</div>
-        <div style="opacity:.85">Página no reconocida del flujo de comprobantes.</div>
+        <div style="opacity:.85">Página no reconocida del flujo.</div>
+        <div style="opacity:.85">En curso: <b>${inv?.orderId || '—'}</b></div>
         <div style="margin-top:10px;display:flex;gap:8px">
             <button id="pa-restart" style="${btnStyle('#1f7a3a')}">Ir al inicio</button>
             <button id="pa-cancel" style="${btnStyle('#7a1f1f')}">Cancelar</button>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+            <button id="pa-done" style="${btnStyle('#333')}">Ya se facturó, seguir</button>
+            <button id="pa-skip" style="${btnStyle('#333')}">Saltar esta</button>
         </div>`;
+    // "Ir al inicio" REHACE la factura en curso: si ya salió de ARCA (el driver
+    // murió después de generar, p.ej. en Imprimir), usá "Ya se facturó, seguir"
+    // para marcarla ok y pasar a la siguiente sin duplicarla.
     el.querySelector('#pa-restart').onclick = () => (location.href = START_URL);
     el.querySelector('#pa-cancel').onclick = cancelAll;
+    el.querySelector('#pa-done').onclick = () => inv && shiftAndGoNext(inv, 'ok', 'Generada (confirmada a mano)');
+    el.querySelector('#pa-skip').onclick = () => inv && shiftAndGoNext(inv, 'error', 'Saltada manualmente');
 }
 
 async function cancelAll() {
@@ -534,7 +534,7 @@ function renderIdleBadge() {
         else if (href.includes('gen_com_datos_receptor_bc_extra.jsp')) await stepReceptorExtra(inv);
         else if (href.includes('genComDatosOperacion.do')) await stepOperacion(inv, cfg);
         else if (href.includes('genComResumenDatos.do')) await stepResumen(inv, state);
-        else renderUnknownPanel(state);
+        else renderUnknownPanel(state, inv);
     } catch (e) {
         console.error('[ARCA driver]', e);
         await failCurrent(state, inv, e.message);
