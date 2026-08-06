@@ -19,7 +19,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["http://localhost:3000/*", "https://tcg-premium.vercel.app/*", "https://www.mercadolibre.com.ar/ventas/*", "https://www.pokeargentum.com/*"],
+      "matches": ["http://localhost:3000/*", "https://tcg-premium.vercel.app/*", "https://www.mercadolibre.com.ar/ventas/*", "https://pokeargentum.com/*", "https://www.pokeargentum.com/*", "https://konekotekka.com/*", "https://www.konekotekka.com/*"],
       "js": ["scripts/lib/storage.js", "scripts/controllers/tcg-premium.js"],
       "run_at": "document_start"
     },

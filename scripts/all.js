@@ -17,12 +17,17 @@
 //   - queue[0] es la factura EN CURSO; se saca recién cuando se genera o falla.
 //   - results acumula { orderId, status:'ok'|'error', detail, at }.
 //
-// A vs B: por número de documento. >=11 dígitos => CUIT => Factura A (discrimina
-// IVA). Si no => DNI => Factura B (consumidor final, IVA incluido).
+// QUÉ COMPROBANTE SE EMITE: lo define la CONDICIÓN FISCAL DEL EMISOR, no el
+// documento del cliente. El admin lo manda en `config.tipoComprobante`:
+//   - 'C'    => monotributo (konekotekka): siempre Factura C, sin discriminar IVA.
+//   - 'auto' => responsable inscripto (pokeargentum), la lógica de siempre:
+//               >=11 dígitos => CUIT => Factura A (discrimina IVA);
+//               si no => DNI => Factura B (consumidor final, IVA incluido).
+// Sin `tipoComprobante` cae en 'auto', así que las colas viejas siguen igual.
 //
-// OJO (CONFIRMAR EN VIVO): los valores marcados TO-VERIFY (perfil A: universo,
-// condición IVA, alícuota) salen de la doc de AFIP pero no se pudieron probar
-// contra el sitio real. La rama B replica lo que ya venías usando.
+// OJO (CONFIRMAR EN VIVO): los valores marcados TO-VERIFY (perfiles A y C) salen
+// de la doc de AFIP pero no se pudieron probar contra el sitio real. La rama B
+// replica lo que ya venías usando.
 // ============================================================================
 
 const STORAGE_KEY = 'invoicing';
@@ -30,11 +35,18 @@ const START_URL = '/rcel/jsp/buscarPtosVtas.do';
 const ON_AFIP = location.href.includes('fe.afip.gob.ar/rcel');
 
 // Perfiles por tipo de comprobante. B = valores ya probados. A = best-effort.
+// C = monotributo (konekotekka). El desplegable de tipo de comprobante ya viene
+// en "2" por default en esa cuenta, así que lo dejamos como está en vez de
+// buscarlo por texto (evita que el matcher agarre otro select).
+// `idivareceptor: null` = no pisar lo que ARCA autocompleta del padrón al
+// validar el CUIT: desde ML no sabemos la condición frente al IVA del comprador.
 const TYPE_PROFILES = {
     B: { universoComprobante: '2', idivareceptor: '5' /* consumidor final */, discriminaIva: false },
     A: { universoComprobante: '1', idivareceptor: '1' /* responsable inscripto — TO-VERIFY */, discriminaIva: true },
+    C: { universoComprobante: '2', idivareceptor: null, discriminaIva: false, skipTypeSelect: true },
 };
 const IVA_21_ID = '5'; // id de alícuota 21% en AFIP — TO-VERIFY
+const CONSUMIDOR_FINAL_ID = '5'; // condición IVA del receptor cuando el doc es DNI
 
 // ---------------------------------------------------------------- helpers ----
 const getState = () => chrome.storage.local.get(STORAGE_KEY).then((r) => r[STORAGE_KEY] || null);
@@ -42,8 +54,16 @@ const setState = (state) => chrome.storage.local.set({ [STORAGE_KEY]: state });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const onlyDigits = (s) => String(s || '').replace(/\D/g, '');
-const invoiceType = (inv) => (onlyDigits(inv.clientId).length >= 11 ? 'A' : 'B');
 const docTypeFor = (inv) => (onlyDigits(inv.clientId).length >= 11 ? '80' /* CUIT */ : '96' /* DNI */);
+
+// El tipo sale de la config de la cuenta emisora. 'auto' (o vacío) = A/B por
+// documento del cliente, que es lo de siempre para un responsable inscripto.
+function invoiceType(inv, cfg = {}) {
+    const forced = inv.tipoComprobante || cfg.tipoComprobante;
+    if (forced && forced !== 'auto' && TYPE_PROFILES[forced]) return forced;
+    return onlyDigits(inv.clientId).length >= 11 ? 'A' : 'B';
+}
+const profileFor = (inv, cfg) => TYPE_PROFILES[invoiceType(inv, cfg)];
 
 function todayDDMMYYYY() {
     const d = new Date();
@@ -104,30 +124,59 @@ function afipError() {
 }
 
 // ------------------------------------------------------------------ steps ----
-function selectComprobanteType(type) {
-    // Si AFIP muestra un <select> de tipo de comprobante (aparte de universo),
-    // elegimos "Factura A"/"Factura B" por texto. Best-effort. TO-VERIFY.
-    const re = type === 'A' ? /factura\s*a\b/i : /factura\s*b\b/i;
+function findComprobanteOption(type) {
+    const re = new RegExp(`factura\\s*${type}\\b`, 'i');
     for (const sel of document.querySelectorAll('select')) {
-        if (sel.name === 'universoComprobante') continue;
+        if (sel.name === 'universoComprobante' || sel.name === 'puntoDeVenta') continue;
         const opt = [...sel.options].find((o) => re.test(o.textContent));
-        if (opt) {
-            sel.value = opt.value;
-            triggerChange(sel);
-            return true;
-        }
+        if (opt) return { sel, opt };
     }
-    return false;
+    return null;
+}
+
+// El select de tipo de comprobante se puebla por AJAX DESPUÉS de elegir el
+// punto de venta, así que esperamos a que aparezca la opción en vez de dormir
+// un rato fijo. Si nunca aparece, es que ARCA no habilitó esa clase en ese
+// punto de venta: mejor fallar con un mensaje claro que seguir con el select
+// en "seleccionar..." y comerse un error de validación críptico.
+async function selectComprobanteType(type, { timeout = 8000 } = {}) {
+    const start = Date.now();
+    for (;;) {
+        const hit = findComprobanteOption(type);
+        if (hit) {
+            hit.sel.value = hit.opt.value;
+            triggerChange(hit.sel);
+            return;
+        }
+        if (Date.now() - start > timeout) {
+            throw new Error(`ARCA no ofrece "Factura ${type}" en el punto de venta elegido`);
+        }
+        await sleep(200);
+    }
+}
+
+// El punto de venta es un <select> y el value puede venir con ceros a la
+// izquierda ("00012") según la cuenta. Probamos el valor tal cual y, si no hay
+// opción, buscamos la que tenga ese número.
+function setPuntoDeVenta(el, pv) {
+    const wanted = onlyDigits(pv);
+    if (!el.options) return setValue(el, pv);
+    const match = [...el.options].find((o) => onlyDigits(o.value) === wanted)
+        || [...el.options].find((o) => onlyDigits(o.textContent).startsWith(wanted));
+    if (!match) throw new Error(`El punto de venta ${pv} no está en la lista de ARCA`);
+    el.value = match.value;
+    triggerChange(el);
 }
 
 async function stepStart(inv, cfg) {
     const pv = await waitFor('[name=puntoDeVenta]');
-    setValue(pv, cfg.puntoDeVenta || '1');
-    const profile = TYPE_PROFILES[invoiceType(inv)];
+    setPuntoDeVenta(pv, cfg.puntoDeVenta || '1');
+    const profile = profileFor(inv, cfg);
     const universo = document.querySelector('[name=universoComprobante]');
-    if (universo) setValue(universo, profile.universoComprobante);
-    await sleep(300); // el tipo de comprobante puede cargarse por AJAX tras elegir universo
-    selectComprobanteType(invoiceType(inv));
+    if (universo && profile.universoComprobante) setValue(universo, profile.universoComprobante);
+    // En monotributo el desplegable ya viene en el comprobante correcto: no lo
+    // buscamos por texto para no pisar otro select del formulario.
+    if (!profile.skipTypeSelect) await selectComprobanteType(invoiceType(inv, cfg));
     clickContinue();
 }
 
@@ -139,10 +188,16 @@ async function stepEmisor(cfg) {
     clickContinue();
 }
 
-async function stepReceptor(inv) {
-    const profile = TYPE_PROFILES[invoiceType(inv)];
+async function stepReceptor(inv, cfg) {
+    const profile = profileFor(inv, cfg);
     const iva = await waitFor('#idivareceptor');
-    setValue(iva, profile.idivareceptor);
+    // Sin condición fija en el perfil (C), usamos la que manda el admin —
+    // ML nos dice el taxpayer_type del comprador. Si tampoco viene: DNI es
+    // consumidor final, y con CUIT no tocamos nada (la trae ARCA del padrón).
+    const cond = profile.idivareceptor
+        ?? inv.condicionIva
+        ?? (docTypeFor(inv) === '96' ? CONSUMIDOR_FINAL_ID : null);
+    if (cond) setValue(iva, cond);
     setValue(document.querySelector('#idtipodocreceptor'), docTypeFor(inv));
     const pago = document.querySelector('#formadepago1');
     if (pago) pago.checked = true;
@@ -168,14 +223,14 @@ async function stepOperacion(inv, cfg) {
 
     const total = Number(inv.total) || 0;
     const precio = document.querySelector('#detalle_precio1');
-    if (invoiceType(inv) === 'A') {
+    if (profileFor(inv, cfg).discriminaIva) {
         // Factura A: se carga el NETO; AFIP agrega el IVA. TO-VERIFY selectores.
         const neto = total / 1.21;
         setValue(precio, neto.toFixed(2));
         const ivaSel = document.querySelector('#detalle_iva1, [name=detalle_iva1]');
         if (ivaSel) setValue(ivaSel, IVA_21_ID);
     } else {
-        // Factura B: IVA incluido, precio bruto.
+        // Factura B y C: precio bruto, sin discriminar IVA.
         setValue(precio, total.toFixed(2));
     }
     clickContinue();
@@ -238,7 +293,7 @@ function progressOf(state) {
 function renderPanel(state, inv) {
     const el = ensurePanel();
     const { done, total } = progressOf(state);
-    const tipo = invoiceType(inv);
+    const tipo = invoiceType(inv, state.config || {});
     el.innerHTML = `
         <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Facturando ${done + 1}/${total}</div>
         <div style="opacity:.85">Orden <b>${inv.orderId}</b> · Factura ${tipo}</div>
@@ -280,7 +335,7 @@ function renderConfirmPanel(state, inv) {
     const { done, total } = progressOf(state);
     el.innerHTML = `
         <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Revisá la factura ${done + 1}/${total}</div>
-        <div style="opacity:.85">Orden <b>${inv.orderId}</b> · Factura ${invoiceType(inv)} · $${Number(inv.total).toFixed(2)}</div>
+        <div style="opacity:.85">Orden <b>${inv.orderId}</b> · Factura ${invoiceType(inv, state.config || {})} · $${Number(inv.total).toFixed(2)}</div>
         <div style="margin-top:10px;display:flex;gap:8px">
             <button id="pa-gen" style="${btnStyle('#1f7a3a')}">Generar</button>
             <button id="pa-skip" style="${btnStyle('#7a1f1f')}">Saltar</button>
@@ -327,12 +382,37 @@ function btnStyle(bg) {
     return `flex:1;padding:6px 8px;background:${bg};color:#fff;border:0;border-radius:8px;cursor:pointer;font:600 12px system-ui`;
 }
 
+// Sin cola el driver no hace nada, y ese silencio es indistinguible de "la
+// extensión no está instalada". Un cartelito que se va solo alcanza para saber
+// que sí está viva y que lo que falta es mandar la cola desde el admin.
+function renderIdleBadge() {
+    const el = document.createElement('div');
+    el.style.cssText = [
+        'position:fixed', 'right:16px', 'bottom:16px', 'z-index:2147483647',
+        'background:#0b0b14', 'color:#F5CE4B', 'border:1px solid #F5CE4B', 'border-radius:10px',
+        'padding:8px 12px', 'font:600 12px system-ui,sans-serif', 'opacity:.95',
+        'transition:opacity .4s',
+    ].join(';');
+    el.textContent = 'PokeArgentum: extensión activa, sin cola';
+    document.documentElement.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; }, 4000);
+    setTimeout(() => el.remove(), 4600);
+}
+
 // ------------------------------------------------------------------ main -----
 (async function main() {
     if (!ON_AFIP) return;
 
     let state = await getState();
-    if (!state) return; // no hay batch en curso → no molestamos al usuario
+    console.log('[PokeArgentum] driver ARCA cargado', {
+        paso: location.pathname,
+        enCola: state?.queue?.length ?? 0,
+        activo: Boolean(state?.active),
+    });
+    if (!state) {
+        renderIdleBadge(); // no hay batch en curso, pero avisamos que estamos vivos
+        return;
+    }
 
     if (!state.queue || !state.queue.length) {
         if (state.active) {
@@ -373,7 +453,7 @@ function btnStyle(bg) {
         const href = location.href;
         if (href.includes('buscarPtosVtas.do')) await stepStart(inv, cfg);
         else if (href.includes('genComDatosEmisor.do')) await stepEmisor(cfg);
-        else if (href.includes('genComDatosReceptor.do')) await stepReceptor(inv);
+        else if (href.includes('genComDatosReceptor.do')) await stepReceptor(inv, cfg);
         else if (href.includes('gen_com_datos_receptor_bc_extra.jsp')) await stepReceptorExtra(inv);
         else if (href.includes('genComDatosOperacion.do')) await stepOperacion(inv, cfg);
         else if (href.includes('genComResumenDatos.do')) await stepResumen(inv, state);
