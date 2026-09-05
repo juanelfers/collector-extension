@@ -55,7 +55,23 @@ const TCGPremium = {
 
     // El admin manda la cola de facturación; la guardamos en chrome.storage.local
     // para que el driver de ARCA (all.js) la consuma en fe.afip.gob.ar.
-    async loadInvoiceQueue({ queue = [], config = {}, mode = 'auto' }) {
+    // OJO: un batch de cientos de facturas dura horas. Si ya hay uno vivo, NO lo
+    // pisamos: se rebota con `invoiceQueueBusy` y que el humano decida. Un batch
+    // en PAUSA también cuenta como vivo (la cola sigue ahí, esperando reanudar).
+    async loadInvoiceQueue({ queue = [], config = {}, mode = 'auto', force = false }) {
+        const { invoicing } = await chrome.storage.local.get('invoicing');
+        const pending = invoicing?.queue?.length || 0;
+        if (pending && !force) {
+            try {
+                window.postMessage({
+                    target: 'tcg-premium-admin',
+                    event: 'invoiceQueueBusy',
+                    pending,
+                    done: invoicing?.results?.length || 0
+                });
+            } catch { }
+            return;
+        }
         const state = { active: true, mode, config, queue, results: [], attempts: {} };
         await chrome.storage.local.set({ invoicing: state });
         try {

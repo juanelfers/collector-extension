@@ -32,7 +32,13 @@
 
 const STORAGE_KEY = 'invoicing';
 const START_URL = '/rcel/jsp/buscarPtosVtas.do';
-const ON_AFIP = location.href.includes('fe.afip.gob.ar/rcel');
+const ON_AFIP = location.href.includes('fe.afip.gob.ar');
+// Estar en fe.afip.gob.ar NO alcanza: si la sesión se vence a mitad del batch,
+// ARCA rebota a otra parte del sitio y ninguno de los pasos matchea. Ahí antes
+// el driver quedaba mudo; ahora se distingue para poder avisar.
+const ON_RCEL = location.href.includes('fe.afip.gob.ar/rcel');
+// Entrada al RCEL. /rcel/jsp/* en frío da 403: la sesión la crea el handoff SSO.
+const RCEL_SSO = 'https://auth.afip.gob.ar/contribuyente_/login.xhtml?action=SYSTEM&system=rcel';
 
 // Perfiles por tipo de comprobante. B = valores ya probados. A = best-effort.
 // C = monotributo (konekotekka). El desplegable de tipo de comprobante ya viene
@@ -115,6 +121,26 @@ function tryClickContinue() {
     return Boolean(btn);
 }
 
+// Errores que NO son de esta factura sino de la configuración del batch: la
+// fecha, el punto de venta, la clase de comprobante. Si no frenamos, la cola
+// entera falla una por una (378 navegaciones para nada). Se pausa y se muestra
+// el texto real de ARCA, que es el único que dice qué corregir en el admin.
+const FATAL_ERRORS = [
+    /fecha del comprobante es inv[áa]lida/i,
+    /anterior al inicio de actividades/i,
+    /comprobantes emitidos con fecha posterior/i,
+    /no ofrece "Factura/i,
+    /no está en la lista de ARCA/i,
+];
+const isFatalMessage = (msg) => FATAL_ERRORS.some((re) => re.test(msg || ''));
+
+// Mismo criterio pero mirando la página: el error de fecha llega como una
+// pantalla aparte con "< Volver", que no es ninguno de los pasos conocidos.
+function fatalPageError() {
+    const lines = (document.body?.innerText || '').split('\n').map((s) => s.trim());
+    return lines.find((l) => l && l.length < 300 && isFatalMessage(l)) || null;
+}
+
 // Detección conservadora de error de validación de AFIP en la página actual.
 function afipError() {
     const box = document.querySelector('#ha, .msg_error, .error, [class*=error]');
@@ -139,7 +165,7 @@ function findComprobanteOption(type) {
 // un rato fijo. Si nunca aparece, es que ARCA no habilitó esa clase en ese
 // punto de venta: mejor fallar con un mensaje claro que seguir con el select
 // en "seleccionar..." y comerse un error de validación críptico.
-async function selectComprobanteType(type, { timeout = 8000 } = {}) {
+async function selectComprobanteType(type, { timeout = 20000 } = {}) {
     const start = Date.now();
     for (;;) {
         const hit = findComprobanteOption(type);
@@ -298,7 +324,10 @@ async function capturePdf(inv) {
         const idm = document.documentElement.innerHTML.match(/idComprobante\s*=\s*['"]?(\d+)/);
         if (!idm) return false;
         const url = new URL(`imprimirComprobante.do?c=${idm[1]}`, location.href).href;
-        const res = await fetch(url, { credentials: 'include' });
+        // Timeout: ARCA a veces deja el request colgado para siempre y el batch
+        // muere acá. Abortar corta también la lectura del body; cae al catch,
+        // devuelve false y la factura sigue como "generada sin PDF".
+        const res = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(20000) });
         if (!res.ok) return false;
         const buf = await res.arrayBuffer();
         // Magia %PDF al principio; si vino HTML (otra página intermedia), plan B.
@@ -334,6 +363,17 @@ async function shiftAndGoNext(inv, status, detail) {
 }
 const completeCurrent = (state, inv, status, detail) => shiftAndGoNext(inv, status, detail);
 const failCurrent = (state, inv, detail) => shiftAndGoNext(inv, 'error', detail);
+
+// Freno de mano: deja la cola intacta (no consume la factura en curso) y espera
+// a que el humano arregle la config en el admin y reanude.
+async function pauseBatch(state, reason) {
+    const fresh = (await getState()) || state;
+    fresh.active = false;
+    fresh.pauseReason = reason || null;
+    await setState(fresh);
+    console.warn('[ARCA driver] batch en pausa:', reason);
+    renderPausedPanel(fresh);
+}
 
 // -------------------------------------------------------------------- UI -----
 function ensurePanel() {
@@ -381,9 +421,15 @@ function renderPanel(state, inv) {
 function renderPausedPanel(state) {
     const el = ensurePanel();
     const { done, total } = progressOf(state);
+    const fecha = state.config?.fecha;
     el.innerHTML = `
         <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Facturación en pausa</div>
         <div style="opacity:.85">${done}/${total} hechas · ${total - done} pendientes</div>
+        ${state.pauseReason ? `
+        <div style="margin-top:8px;padding:8px;background:#2a1414;border-radius:8px;color:#ff8a8a">
+            ${state.pauseReason}
+        </div>
+        <div style="margin-top:6px;opacity:.8">Arreglalo en el admin${fecha ? ` (fecha enviada: <b>${fecha}</b>)` : ''} y volvé a mandar la cola.</div>` : ''}
         <div style="margin-top:10px;display:flex;gap:8px">
             <button id="pa-resume" style="${btnStyle('#1f7a3a')}">Reanudar</button>
             <button id="pa-cancel" style="${btnStyle('#7a1f1f')}">Cancelar</button>
@@ -391,6 +437,10 @@ function renderPausedPanel(state) {
     el.querySelector('#pa-resume').onclick = async () => {
         const s = (await getState()) || state;
         s.active = true;
+        s.pauseReason = null;
+        // La factura en curso ya gastó intentos contra el error viejo: sin esto
+        // el watchdog la mata apenas reanudás.
+        if (s.attempts && s.queue?.[0]) delete s.attempts[s.queue[0].orderId];
         await setState(s);
         location.href = START_URL;
     };
@@ -450,6 +500,34 @@ function renderUnknownPanel(state, inv) {
     el.querySelector('#pa-skip').onclick = () => inv && shiftAndGoNext(inv, 'error', 'Saltada manualmente');
 }
 
+// Estamos en AFIP pero fuera del comprobante en línea: típicamente la sesión se
+// venció y ARCA nos rebotó al portal. No se toca la cola (no se perdió nada):
+// sólo hay que volver a entrar por el handoff SSO.
+function renderOffRcelPanel(state) {
+    const el = ensurePanel();
+    const { done, total } = progressOf(state);
+    el.innerHTML = `
+        <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Facturación a medias</div>
+        <div style="opacity:.85">${done}/${total} hechas · <b>${total - done}</b> pendientes</div>
+        <div style="margin-top:8px;opacity:.85">
+            Saliste del comprobante en línea (se habrá vencido la sesión). La cola
+            está intacta: volvé a entrar y sigue donde quedó.
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px">
+            <button id="pa-back" style="${btnStyle('#1f7a3a')}">Volver y seguir</button>
+            <button id="pa-cancel" style="${btnStyle('#7a1f1f')}">Cancelar</button>
+        </div>`;
+    el.querySelector('#pa-back').onclick = async () => {
+        const s = (await getState()) || state;
+        s.active = true;
+        s.pauseReason = null;
+        if (s.attempts && s.queue?.[0]) delete s.attempts[s.queue[0].orderId];
+        await setState(s);
+        location.href = RCEL_SSO;
+    };
+    el.querySelector('#pa-cancel').onclick = cancelAll;
+}
+
 async function cancelAll() {
     await chrome.storage.local.remove(STORAGE_KEY);
     document.getElementById('pa-arca-panel')?.remove();
@@ -487,7 +565,7 @@ function renderIdleBadge() {
         activo: Boolean(state?.active),
     });
     if (!state) {
-        renderIdleBadge(); // no hay batch en curso, pero avisamos que estamos vivos
+        if (ON_RCEL) renderIdleBadge(); // sin batch, pero avisamos que estamos vivos
         return;
     }
 
@@ -496,7 +574,14 @@ function renderIdleBadge() {
             state.active = false;
             await setState(state);
         }
-        if (state.results && state.results.length) renderDonePanel(state);
+        if (state.results && state.results.length && ON_RCEL) renderDonePanel(state);
+        return;
+    }
+
+    // Quedan facturas pero estamos fuera del RCEL: ningún paso va a matchear y
+    // el driver se quedaría mudo hasta que alguien mire la pantalla. Avisamos.
+    if (!ON_RCEL) {
+        renderOffRcelPanel(state);
         return;
     }
 
@@ -519,6 +604,15 @@ function renderIdleBadge() {
 
     renderPanel(state, inv);
 
+    // Error de configuración (fecha, PV, clase de comprobante): le va a pasar a
+    // TODAS, así que se frena la cola entera en vez de quemarla factura por
+    // factura. La pantalla de "Fecha inválida" ni siquiera es un paso conocido.
+    const fatal = fatalPageError();
+    if (fatal) {
+        await pauseBatch(state, fatal);
+        return;
+    }
+
     // Si AFIP recargó el paso con un error de validación, no reintentamos en loop.
     const err = afipError();
     if (err && state.attempts[inv.orderId] > 2) {
@@ -537,6 +631,7 @@ function renderIdleBadge() {
         else renderUnknownPanel(state, inv);
     } catch (e) {
         console.error('[ARCA driver]', e);
-        await failCurrent(state, inv, e.message);
+        if (isFatalMessage(e.message)) await pauseBatch(state, e.message);
+        else await failCurrent(state, inv, e.message);
     }
 })();

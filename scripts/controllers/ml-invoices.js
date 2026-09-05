@@ -29,14 +29,25 @@ async function getPdf(orderId) {
     return invoicePdfs[orderId] || null;
 }
 
+// Cuánto se guarda el base64 de una factura YA subida. El PDF se conserva a
+// propósito: si la subida fue un falso positivo, sin esto quedaba marcada como
+// hecha y sin archivo para reintentar. El manifest pide `unlimitedStorage`, así
+// que lo único que hace falta es no acumular para siempre.
+const KEEP_UPLOADED_MS = 30 * 24 * 60 * 60 * 1000;
+
 async function markUploaded(orderId) {
     const { invoicePdfs = {} } = await chrome.storage.local.get('invoicePdfs');
-    if (invoicePdfs[orderId]) {
-        // Sacamos el base64 (pesa) y dejamos la marca, así el admin puede saber
-        // qué se subió y el storage no explota con cientos de PDFs.
-        invoicePdfs[orderId] = { uploaded: true, at: Date.now() };
-        await chrome.storage.local.set({ invoicePdfs });
+    if (!invoicePdfs[orderId]) return;
+    invoicePdfs[orderId] = { ...invoicePdfs[orderId], uploaded: true, at: Date.now() };
+    // Recién acá soltamos los base64 viejos: a esta altura ya se verificaron en
+    // ML y sólo ocupan lugar.
+    const cutoff = Date.now() - KEEP_UPLOADED_MS;
+    for (const [id, entry] of Object.entries(invoicePdfs)) {
+        if (entry?.uploaded && entry.dataUrl && (entry.at || 0) < cutoff) {
+            invoicePdfs[id] = { uploaded: true, at: entry.at };
+        }
     }
+    await chrome.storage.local.set({ invoicePdfs });
 }
 
 function waitFor(getter, { timeout = 15000, interval = 300 } = {}) {
@@ -55,14 +66,61 @@ function waitFor(getter, { timeout = 15000, interval = 300 } = {}) {
     });
 }
 
-const findFileInput = () => document.querySelector('input[type=file]');
+// El input de archivo suele estar oculto detrás de un botón estilado (Andes),
+// así que acá NO se filtra por visibilidad. Se prefiere el que declara PDF.
+const findFileInput = () =>
+    document.querySelector('input[type=file][accept*="pdf"]')
+    || document.querySelector('input[type=file]');
 
 // Botón de confirmar la subida. La página es una SPA de ML (componentes Andes):
 // buscamos por texto entre los botones visibles. TO-VERIFY.
+// El negativo importa tanto como el positivo: "Cancelar" y "Volver" matchean
+// varias de estas palabras en sus labels largos y mandarían el flujo al carajo.
+const SUBMIT_RE = /adjuntar|enviar|confirmar|guardar|subir/i;
+const NOT_SUBMIT_RE = /cancelar|volver|cerrar|salir|atr[áa]s|descartar|eliminar|quitar/i;
+
 function findSubmit() {
-    return [...document.querySelectorAll('button')]
+    return [...document.querySelectorAll('button, [role=button]')]
         .filter((b) => !b.disabled && b.offsetParent !== null)
-        .find((b) => /adjuntar|enviar|confirmar|guardar|subir/i.test(b.textContent || ''));
+        .filter((b) => !NOT_SUBMIT_RE.test(b.textContent || ''))
+        .find((b) => SUBMIT_RE.test(b.textContent || ''));
+}
+
+// Señales de que ML aceptó la factura. Se usan como confirmación POSITIVA: sin
+// alguna de estas no damos por subida nada (ver waitForOutcome).
+const SUCCESS_RE = /factura\s+(adjuntada|cargada|subida)|se\s+adjunt[óo]|adjuntada\s+correctamente|con\s+[ée]xito|listo/i;
+
+function visibleErrorText() {
+    const node = [...document.querySelectorAll('[class*=error], [class*=danger], [role=alert]')]
+        .find((n) => n.offsetParent !== null && (n.textContent || '').trim());
+    return node ? node.textContent.trim().slice(0, 160) : null;
+}
+
+// Después de confirmar, esperamos un desenlace EXPLÍCITO. El criterio viejo era
+// "si no veo un div de error, salió bien", y en una SPA eso da falso positivo
+// con cualquier fallo mudo: marcaba la factura como subida sin estarlo. Ahora,
+// si no hay señal clara, devolvemos null y se lo preguntamos al humano.
+async function waitForOutcome({ timeout = 12000, interval = 400 } = {}) {
+    const start = Date.now();
+    const startUrl = location.href;
+    for (;;) {
+        const err = visibleErrorText();
+        if (err) return { status: 'error', detail: err };
+
+        if (SUCCESS_RE.test(document.body?.innerText || '')) return { status: 'ok', detail: 'texto de éxito' };
+        // Salir de la pantalla de adjuntar también cuenta: ML navega al volver.
+        if (location.href !== startUrl && !PAGE_RE.test(location.href)) {
+            return { status: 'ok', detail: 'ML navegó fuera de la pantalla' };
+        }
+        // El formulario desapareció y no hay error a la vista: la subida se tomó.
+        // Con piso de tiempo, porque la SPA puede desmontar el input un instante
+        // mientras procesa y eso no es un éxito, es un spinner.
+        const elapsed = Date.now() - start;
+        if (elapsed > 2500 && !findFileInput()) return { status: 'ok', detail: 'el formulario se cerró' };
+
+        if (elapsed > timeout) return null;
+        await sleep(interval);
+    }
 }
 
 // El truco estándar para setear un input file por código: DataTransfer.
@@ -256,14 +314,24 @@ async function cancelAll() {
         return renderManualPanel(state, orderId, 'Adjunté el PDF pero no encontré el botón de confirmar: revisá y confirmá a mano.');
     }
     submit.click();
-    await sleep(3000); // esperar la respuesta de ML
+    renderPanel(state, orderId, 'Confirmado, esperando a ML…');
 
-    // Éxito heurístico: si la página no muestra un error visible, damos por ok.
-    const errBox = [...document.querySelectorAll('[class*=error], [class*=danger]')]
-        .find((n) => n.offsetParent !== null && (n.textContent || '').trim());
-    if (errBox) {
-        return renderManualPanel(state, orderId, `ML mostró un error: ${errBox.textContent.trim().slice(0, 120)}`);
+    const outcome = await waitForOutcome();
+    console.log('[PokeArgentum] ML subida', orderId, outcome);
+
+    if (outcome?.status === 'error') {
+        return renderManualPanel(state, orderId, `ML mostró un error: ${outcome.detail}`);
+    }
+    // Sin confirmación NO marcamos nada: preferimos preguntar antes que anotar
+    // como subida una factura que no llegó. Los selectores de esta pantalla
+    // están sin verificar, así que este camino es el esperable la primera vez.
+    if (!outcome) {
+        return renderManualPanel(
+            state,
+            orderId,
+            'Adjunté el PDF y confirmé, pero ML no me devolvió una señal clara. Fijate en la pantalla si quedó cargada.',
+        );
     }
     await markUploaded(orderId);
-    await shiftAndGoNext(orderId, 'ok');
+    await shiftAndGoNext(orderId, 'ok', outcome.detail);
 })();
