@@ -17,7 +17,7 @@
 const ADMIN_BASE_DEFAULT = 'https://cartas.konekotekka.com.ar';
 const ADMIN_BASE_LOCAL = 'http://localhost:3000';
 const LINK_ID = 'ka-admin-link';
-const ACCENT = '#5939C2'; // violeta de Konekotekka
+const ACCENT = '#3483fa'; // el azul de ML: el link es uno más de la barra del vendedor
 // ML dibuja la barra de vendedor tarde (y a veces la vuelve a dibujar). Después
 // de esta ventana se deja de barrer el DOM por texto: en una publicación ajena
 // no va a aparecer nunca y el script queda corriendo en cualquier pestaña de ML.
