@@ -169,10 +169,14 @@ function afipError() {
 }
 
 // ------------------------------------------------------------------ steps ----
+// OJO: en monotributo (konekotekka) el desplegable "Tipo de Comprobante" ES
+// `universoComprobante` (verificado en vivo 2026-09-05: se puebla por AJAX con
+// "2=Factura C, 3=Nota de Débito C, …"). Saltearlo por nombre hacía que nunca
+// apareciera "Factura C" y el batch se frenaba con "ARCA no ofrece…".
 function findComprobanteOption(type) {
     const re = new RegExp(`factura\\s*${type}\\b`, 'i');
     for (const sel of document.querySelectorAll('select')) {
-        if (sel.name === 'universoComprobante' || sel.name === 'puntoDeVenta') continue;
+        if (sel.name === 'puntoDeVenta') continue;
         const opt = [...sel.options].find((o) => re.test(o.textContent));
         if (opt) return { sel, opt };
     }
