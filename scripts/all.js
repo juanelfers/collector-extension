@@ -40,16 +40,35 @@ const ON_RCEL = location.href.includes('fe.afip.gob.ar/rcel');
 // Entrada al RCEL. /rcel/jsp/* en frío da 403: la sesión la crea el handoff SSO.
 const RCEL_SSO = 'https://auth.afip.gob.ar/contribuyente_/login.xhtml?action=SYSTEM&system=rcel';
 
+// Orden de los pasos del comprobante. Sirve para darse cuenta de que el humano
+// fue para ATRÁS: el driver sólo avanza (Continuar) o vuelve al inicio para la
+// siguiente factura, así que caer en un paso anterior sin pasar por el inicio
+// es que alguien apretó "< Volver" o la flecha del navegador.
+const STEP_ORDER = [
+    'buscarPtosVtas.do',
+    'genComDatosEmisor.do',
+    'genComDatosReceptor.do',
+    'gen_com_datos_receptor_bc_extra.jsp',
+    'genComDatosOperacion.do',
+    'genComResumenDatos.do',
+];
+const stepIndex = (href) => {
+    const i = STEP_ORDER.findIndex((frag) => href.includes(frag));
+    return i < 0 ? null : i;
+};
+const RESUMEN_STEP = STEP_ORDER.length - 1;
+
 // Perfiles por tipo de comprobante. B = valores ya probados. A = best-effort.
-// C = monotributo (konekotekka). El desplegable de tipo de comprobante ya viene
-// en "2" por default en esa cuenta, así que lo dejamos como está en vez de
-// buscarlo por texto (evita que el matcher agarre otro select).
+// C = monotributo (konekotekka). El desplegable de tipo de comprobante se
+// puebla por AJAX después de elegir el punto de venta, igual que en A/B: hay
+// que ESPERAR a que aparezca "Factura C" y elegirla. Apretar Continuar antes
+// dispara el alert "Tipo de Comprobante obligatorio" (visto en vivo 2026-09-05).
 // `idivareceptor: null` = no pisar lo que ARCA autocompleta del padrón al
 // validar el CUIT: desde ML no sabemos la condición frente al IVA del comprador.
 const TYPE_PROFILES = {
     B: { universoComprobante: '2', idivareceptor: '5' /* consumidor final */, discriminaIva: false },
     A: { universoComprobante: '1', idivareceptor: '1' /* responsable inscripto — TO-VERIFY */, discriminaIva: true },
-    C: { universoComprobante: '2', idivareceptor: null, discriminaIva: false, skipTypeSelect: true },
+    C: { universoComprobante: '2', idivareceptor: null, discriminaIva: false },
 };
 const IVA_21_ID = '5'; // id de alícuota 21% en AFIP (verificado en el DOM real)
 const CONSUMIDOR_FINAL_ID = '5'; // condición IVA del receptor cuando el doc es DNI
@@ -200,9 +219,7 @@ async function stepStart(inv, cfg) {
     const profile = profileFor(inv, cfg);
     const universo = document.querySelector('[name=universoComprobante]');
     if (universo && profile.universoComprobante) setValue(universo, profile.universoComprobante);
-    // En monotributo el desplegable ya viene en el comprobante correcto: no lo
-    // buscamos por texto para no pisar otro select del formulario.
-    if (!profile.skipTypeSelect) await selectComprobanteType(invoiceType(inv, cfg));
+    await selectComprobanteType(invoiceType(inv, cfg));
     clickContinue();
 }
 
@@ -358,6 +375,8 @@ async function shiftAndGoNext(inv, status, detail) {
     const fresh = (await getState()) || {};
     fresh.results = [...(fresh.results || []), { orderId: inv.orderId, status, detail: detail || null, at: Date.now() }];
     fresh.queue = (fresh.queue || []).slice(1);
+    fresh.step = 0;
+    fresh.manual = false;
     await setState(fresh);
     location.href = START_URL;
 }
@@ -441,6 +460,8 @@ function renderPausedPanel(state) {
         // La factura en curso ya gastó intentos contra el error viejo: sin esto
         // el watchdog la mata apenas reanudás.
         if (s.attempts && s.queue?.[0]) delete s.attempts[s.queue[0].orderId];
+        s.step = 0;
+        s.manual = false;
         await setState(s);
         location.href = START_URL;
     };
@@ -494,7 +515,13 @@ function renderUnknownPanel(state, inv) {
     // "Ir al inicio" REHACE la factura en curso: si ya salió de ARCA (el driver
     // murió después de generar, p.ej. en Imprimir), usá "Ya se facturó, seguir"
     // para marcarla ok y pasar a la siguiente sin duplicarla.
-    el.querySelector('#pa-restart').onclick = () => (location.href = START_URL);
+    el.querySelector('#pa-restart').onclick = async () => {
+        const s = (await getState()) || state;
+        s.step = 0;
+        s.manual = false;
+        await setState(s);
+        location.href = START_URL;
+    };
     el.querySelector('#pa-cancel').onclick = cancelAll;
     el.querySelector('#pa-done').onclick = () => inv && shiftAndGoNext(inv, 'ok', 'Generada (confirmada a mano)');
     el.querySelector('#pa-skip').onclick = () => inv && shiftAndGoNext(inv, 'error', 'Saltada manualmente');
@@ -522,10 +549,75 @@ function renderOffRcelPanel(state) {
         s.active = true;
         s.pauseReason = null;
         if (s.attempts && s.queue?.[0]) delete s.attempts[s.queue[0].orderId];
+        s.step = 0;
+        s.manual = false;
         await setState(s);
         location.href = RCEL_SSO;
     };
     el.querySelector('#pa-cancel').onclick = cancelAll;
+}
+
+// Modo manual: el humano apretó "< Volver" para corregir algo. El driver no
+// toca la página ni aprieta Continuar; recién cuando vuelve al resumen retoma
+// (y muestra el panel de revisar, sea cual sea el modo: lo que se corrigió a
+// mano lo mira una persona antes de generar).
+function renderManualPanel(state, inv) {
+    const el = ensurePanel();
+    const { done, total } = progressOf(state);
+    el.innerHTML = `
+        <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Corrigiendo a mano ${done + 1}/${total}</div>
+        <div style="opacity:.85">Orden <b>${inv.orderId}</b> · $${Number(inv.total).toFixed(2)}</div>
+        <div style="margin-top:8px;opacity:.85">
+            Volviste atrás: la extensión no toca nada. Avanzá con "Continuar"
+            hasta el resumen y ahí retoma.
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px">
+            <button id="pa-auto" style="${btnStyle('#1f7a3a')}">Seguir solo desde acá</button>
+            <button id="pa-cancel" style="${btnStyle('#7a1f1f')}">Cancelar</button>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+            <button id="pa-skip" style="${btnStyle('#333')}">Saltar esta</button>
+        </div>`;
+    el.querySelector('#pa-auto').onclick = async () => {
+        const s = (await getState()) || state;
+        s.manual = false;
+        await setState(s);
+        renderPanel(s, inv);
+        try {
+            await runStep(location.href, inv, s.config || {}, s);
+        } catch (e) {
+            console.error('[ARCA driver]', e);
+            await failCurrent(s, inv, e.message);
+        }
+    };
+    el.querySelector('#pa-cancel').onclick = cancelAll;
+    el.querySelector('#pa-skip').onclick = () => failCurrent(state, inv, 'Saltada manualmente');
+}
+
+// Guardia del botón "< Volver" de ARCA: antes de que el botón haga lo suyo se
+// deja anotado en el storage que ahora maneja el humano. Sin esto, la página
+// anterior carga, el driver se re-ejecuta, la rellena y aprieta Continuar: el
+// Volver "no anda". Se intercepta en fase de captura para ganarle al onclick
+// inline; el click se repite después de guardar, con un flag para no volver a
+// entrar acá.
+const VOLVER_RE = /^\s*<?\s*volver\s*$/i;
+let volverBypass = false;
+function armVolverGuard() {
+    document.addEventListener('click', async (e) => {
+        if (volverBypass) return;
+        const btn = e.target?.closest?.('input[type=button], input[type=submit], button, a');
+        if (!btn || !VOLVER_RE.test(btn.value || btn.textContent || '')) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const s = await getState();
+        if (s) {
+            s.manual = true;
+            await setState(s);
+        }
+        volverBypass = true;
+        btn.click();
+        volverBypass = false;
+    }, true);
 }
 
 async function cancelAll() {
@@ -552,6 +644,17 @@ function renderIdleBadge() {
     document.documentElement.appendChild(el);
     setTimeout(() => { el.style.opacity = '0'; }, 4000);
     setTimeout(() => el.remove(), 4600);
+}
+
+// Qué paso del comprobante es esta página, y ejecutarlo.
+async function runStep(href, inv, cfg, state) {
+    if (href.includes('buscarPtosVtas.do')) await stepStart(inv, cfg);
+    else if (href.includes('genComDatosEmisor.do')) await stepEmisor(cfg);
+    else if (href.includes('genComDatosReceptor.do')) await stepReceptor(inv, cfg);
+    else if (href.includes('gen_com_datos_receptor_bc_extra.jsp')) await stepReceptorExtra(inv);
+    else if (href.includes('genComDatosOperacion.do')) await stepOperacion(inv, cfg);
+    else if (href.includes('genComResumenDatos.do')) await stepResumen(inv, state);
+    else renderUnknownPanel(state, inv);
 }
 
 // ------------------------------------------------------------------ main -----
@@ -592,10 +695,36 @@ function renderIdleBadge() {
 
     const inv = state.queue[0];
     const cfg = state.config || {};
+    const idx = stepIndex(location.href);
+    armVolverGuard();
+
+    // Fuimos para atrás sin pasar por el inicio: eso lo hace un humano (Volver
+    // o la flecha del navegador), nunca el driver. Pasa a modo manual aunque
+    // el botón no se haya podido interceptar.
+    if (!state.manual && idx != null && state.step != null && idx < state.step) {
+        state.manual = true;
+    }
+
+    if (state.manual) {
+        if (idx === RESUMEN_STEP && document.querySelector('#btngenerar')) {
+            // De vuelta en el resumen: retoma, pero lo que se tocó a mano lo
+            // revisa una persona antes de generar, sea cual sea el modo.
+            state.manual = false;
+            state.step = idx;
+            await setState(state);
+            renderConfirmPanel(state, inv);
+            return;
+        }
+        if (idx != null) state.step = idx;
+        await setState(state);
+        renderManualPanel(state, inv);
+        return;
+    }
 
     // Watchdog anti-loop: si una factura reprocesa demasiados pasos, la saltamos.
     state.attempts = state.attempts || {};
     state.attempts[inv.orderId] = (state.attempts[inv.orderId] || 0) + 1;
+    if (idx != null) state.step = idx;
     await setState(state);
     if (state.attempts[inv.orderId] > 15) {
         await failCurrent(state, inv, 'Demasiados intentos (posible error de AFIP en esta factura)');
@@ -621,14 +750,7 @@ function renderIdleBadge() {
     }
 
     try {
-        const href = location.href;
-        if (href.includes('buscarPtosVtas.do')) await stepStart(inv, cfg);
-        else if (href.includes('genComDatosEmisor.do')) await stepEmisor(cfg);
-        else if (href.includes('genComDatosReceptor.do')) await stepReceptor(inv, cfg);
-        else if (href.includes('gen_com_datos_receptor_bc_extra.jsp')) await stepReceptorExtra(inv);
-        else if (href.includes('genComDatosOperacion.do')) await stepOperacion(inv, cfg);
-        else if (href.includes('genComResumenDatos.do')) await stepResumen(inv, state);
-        else renderUnknownPanel(state, inv);
+        await runStep(location.href, inv, cfg, state);
     } catch (e) {
         console.error('[ARCA driver]', e);
         if (isFatalMessage(e.message)) await pauseBatch(state, e.message);
