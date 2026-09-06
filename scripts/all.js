@@ -427,7 +427,7 @@ async function finishGenerated(state, inv, { timeout = 90000 } = {}) {
     }
     // NUNCA "Imprimir": navega la pestaña al PDF y mata el batch.
     const captured = await capturePdf(inv);
-    await completeCurrent(state, inv, 'ok', captured ? null : 'Generada, pero no pude capturar el PDF');
+    await completeCurrent(state, inv, 'ok', captured === true ? null : `Generada, pero no pude capturar el PDF: ${captured}`);
 }
 
 // Botón "Confirmar" del modal jQuery UI de generación (los botones no tienen
@@ -462,18 +462,31 @@ function waitForDialogConfirm({ timeout = 6000 } = {}) {
 // script corre en otro mundo y no la ve: se le pide a la página que la copie a
 // un atributo del <html> con un <script> inline (ARCA no manda CSP que lo
 // frene). Plan B: que haya quedado escrita en el HTML.
-async function readIdComprobante() {
-    // 1) El service worker lo lee en el MAIN world (executeScript): es lo
-    //    único que anduvo en vivo — el <script> inline de abajo no vio la
-    //    global en las primeras 18 facturas del 2026-09-05.
-    try {
-        const v = await chrome.runtime.sendMessage({ type: 'read-page-var', name: 'idComprobante' });
-        if (/^\d+$/.test(String(v || ''))) return String(v);
-        console.warn('[ARCA driver] read-page-var devolvió', v);
-    } catch (e) {
-        console.warn('[ARCA driver] read-page-var falló', e);
+// Se reintenta un rato: "Comprobante Generado" puede pintarse ANTES de que el
+// callback del AJAX asigne la global. Cada intento deja el motivo en `why`
+// para que llegue al detalle del resultado (no hay consola que mirar en un
+// batch que navega cada 5 segundos).
+async function readIdComprobante(why = []) {
+    for (let i = 0; i < 12; i++) {
+        // 1) El service worker lo lee en el MAIN world (executeScript).
+        try {
+            const v = await chrome.runtime.sendMessage({ type: 'read-page-var', name: 'idComprobante' });
+            if (/^\d+$/.test(String(v || ''))) return String(v);
+            if (i === 0) why.push(`sw:${JSON.stringify(v)}`);
+        } catch (e) {
+            if (i === 0) why.push(`sw-err:${e?.message || e}`);
+        }
+        // 2) <script> inline que copia la global a un atributo del <html>.
+        const inline = readIdInline();
+        if (inline) return inline;
+        if (i === 0) why.push('inline:vacío');
+        await sleep(300);
     }
-    // 2) <script> inline que copia la global a un atributo del <html>.
+    why.push('agotado');
+    return null;
+}
+
+function readIdInline() {
     try {
         const attr = 'data-pa-idcomprobante';
         document.documentElement.removeAttribute(attr);
@@ -490,23 +503,25 @@ async function readIdComprobante() {
     return idm ? idm[1] : null;
 }
 
+// Devuelve true si capturó; si no, un string con el motivo (va al detalle).
 async function capturePdf(inv) {
+    const why = [];
     try {
-        const id = await readIdComprobante();
+        const id = await readIdComprobante(why);
         if (!id) {
-            console.warn('[ARCA driver] sin idComprobante: no capturo el PDF de', inv.orderId);
-            return false;
+            console.warn('[ARCA driver] sin idComprobante: no capturo el PDF de', inv.orderId, why);
+            return `sin idComprobante (${why.join(' ')})`;
         }
         const url = new URL(`imprimirComprobante.do?c=${id}`, location.href).href;
         // Timeout: ARCA a veces deja el request colgado para siempre y el batch
         // muere acá. Abortar corta también la lectura del body; cae al catch,
         // devuelve false y la factura sigue como "generada sin PDF".
         const res = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(20000) });
-        if (!res.ok) return false;
+        if (!res.ok) return `HTTP ${res.status} al bajar el PDF`;
         const buf = await res.arrayBuffer();
         // Magia %PDF al principio; si vino HTML (otra página intermedia), plan B.
         const head = new Uint8Array(buf.slice(0, 4));
-        if (String.fromCharCode(...head) !== '%PDF') return false;
+        if (String.fromCharCode(...head) !== '%PDF') return 'la descarga no era un PDF';
 
         let bin = '';
         const bytes = new Uint8Array(buf);
@@ -522,8 +537,8 @@ async function capturePdf(inv) {
         console.log('[PokeArgentum] PDF capturado', inv.orderId, `${Math.round(bytes.length / 1024)}KB`);
         return true;
     } catch (e) {
-        console.warn('[PokeArgentum] no se pudo capturar el PDF, uso Imprimir', e);
-        return false;
+        console.warn('[PokeArgentum] no se pudo capturar el PDF', e);
+        return `error: ${e?.message || e}`;
     }
 }
 
@@ -663,7 +678,7 @@ function renderStuckPanel(state, inv, reason) {
         </div>`;
     el.querySelector('#pa-done').onclick = async () => {
         const captured = await capturePdf(inv);
-        await completeCurrent(state, inv, 'ok', captured ? null : 'Generada, pero no pude capturar el PDF');
+        await completeCurrent(state, inv, 'ok', captured === true ? null : `Generada, pero no pude capturar el PDF: ${captured}`);
     };
     el.querySelector('#pa-retry').onclick = async () => {
         const s = (await getState()) || state;
@@ -722,8 +737,8 @@ function renderUnknownPanel(state, inv) {
         if (!inv) return;
         // Si todavía estamos parados en el comprobante generado, el PDF se
         // puede rescatar; si no, queda marcada ok sin PDF (se sube a mano).
-        const captured = isGenerated() ? await capturePdf(inv) : false;
-        await shiftAndGoNext(inv, 'ok', captured ? 'Confirmada a mano' : 'Confirmada a mano, sin PDF');
+        const captured = isGenerated() ? await capturePdf(inv) : 'no estaba en el comprobante generado';
+        await shiftAndGoNext(inv, 'ok', captured === true ? 'Confirmada a mano' : `Confirmada a mano, sin PDF (${captured})`);
     };
     el.querySelector('#pa-skip').onclick = () => inv && shiftAndGoNext(inv, 'skipped', 'Saltada a mano');
 }
