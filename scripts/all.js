@@ -231,7 +231,18 @@ async function stepEmisor(cfg) {
     const fc = await waitFor('#fc');
     setValue(fc, cfg.fecha || todayDDMMYYYY());
     setValue(document.querySelector('#idconcepto'), cfg.concepto || '1');
-    setValue(document.querySelector('#actiAsociadaId'), cfg.actividad || '479101');
+    // La actividad asociada SÓLO acepta las que ese CUIT tiene dadas de alta
+    // (konekotekka no tiene la 479101: ver SELLER_FISCAL.actividad en el
+    // admin). Si no está en la lista, ARCA deja pasar el comprobante sin
+    // actividad, pero mejor avisar que fallar en silencio.
+    const acti = document.querySelector('#actiAsociadaId');
+    const wanted = cfg.actividad || '479101';
+    if (acti?.options && ![...acti.options].some((o) => o.value === wanted)) {
+        console.warn('[ARCA driver] este CUIT no tiene la actividad', wanted, 'opciones:',
+            [...acti.options].map((o) => o.value).filter(Boolean));
+    } else {
+        setValue(acti, wanted);
+    }
     clickContinue();
 }
 
@@ -246,8 +257,11 @@ async function stepReceptor(inv, cfg) {
         ?? (docTypeFor(inv) === '96' ? CONSUMIDOR_FINAL_ID : null);
     if (cond) setValue(iva, cond);
     setValue(document.querySelector('#idtipodocreceptor'), docTypeFor(inv));
+    // Contado. Click de verdad, no `checked = true`: es lo que ARCA valida
+    // (registrarSiNingunaCondicionDeVenta) y lo que imprime el PDF. El resumen
+    // muestra "Condiciones de Venta null" IGUAL, a mano también: es de ARCA.
     const pago = document.querySelector('#formadepago1');
-    if (pago) pago.checked = true;
+    if (pago && !pago.checked) pago.click();
     setValue(document.querySelector('#nrodocreceptor'), onlyDigits(inv.clientId));
     await sleep(800); // AFIP valida el doc por AJAX (y, en A, trae la razón social)
     clickContinue();
@@ -266,7 +280,7 @@ async function stepOperacion(inv, cfg) {
     const desc = await waitFor('#detalle_descripcion1');
     setValue(desc, cfg.descripcion || 'Artículos TCG');
     setValue(document.querySelector('#detalle_cantidad1'), '1');
-    setValue(document.querySelector('#detalle_medida1'), '98');
+    setValue(document.querySelector('#detalle_medida1'), '7'); // 7 = unidades (98 era "otras unidades")
 
     const total = Number(inv.total) || 0;
     const precio = document.querySelector('#detalle_precio1');
@@ -295,20 +309,70 @@ async function stepResumen(inv, state) {
     }
 
     if (genBtn) {
-        genBtn.click();
-        // "Confirmar Datos..." no navega: abre un modal jQuery UI ("Usted está
-        // por generar un nuevo comprobante. ¿Confirma la Operación?"). Como el
-        // script no se re-ejecuta sin navegación, el Confirmar hay que
-        // apretarlo desde acá. Recién ese click hace el postback al comprobante.
-        const confirmBtn = await waitForDialogConfirm();
-        confirmBtn?.click();
+        await generateAndFinish(state, inv);
         return;
     }
 
-    // Estado post-generación: capturar el PDF y pasar a la siguiente.
-    // OJO: acá NUNCA hay que clickear "Imprimir": su onclick es
-    // parent.location.href = 'imprimirComprobante.do?c=' + idComprobante, o sea
-    // NAVEGA la pestaña al PDF y el batch muere ahí. El PDF se baja por fetch.
+    // Llegamos acá con el comprobante ya generado (recarga de la página después
+    // de generar): capturar el PDF y pasar a la siguiente.
+    await finishGenerated(state, inv, { timeout: 0 });
+}
+
+// "Confirmar Datos..." → modal jQuery UI → "Confirmar". OJO, verificado en vivo
+// 2026-09-05: ese Confirmar NO navega. generarComprobante() pega por AJAX, la
+// página se actualiza en el lugar ("✔ Comprobante Generado", aparece
+// "Imprimir...") y el id queda en la global `idComprobante`. Como el content
+// script sólo corre al cargar una página, antes de esto el driver se quedaba
+// mudo mostrando "Generar" con la factura YA emitida — y el siguiente click la
+// duplicaba. Ahora se espera el desenlace en la misma página.
+async function generateAndFinish(state, inv) {
+    document.querySelector('#btngenerar')?.click();
+    const confirmBtn = await waitForDialogConfirm();
+    if (!confirmBtn) {
+        renderStuckPanel(state, inv, 'No apareció el modal de "Confirmar" de ARCA.');
+        return;
+    }
+    confirmBtn.click();
+    renderPanel(state, inv, 'Generando en ARCA…');
+    await finishGenerated(state, inv, { timeout: 90000 });
+}
+
+// Estado "comprobante generado" en la MISMA página del resumen: el botón de
+// generar desaparece y aparecen "Imprimir..." / "Comprobante Generado".
+function isGenerated() {
+    if (document.querySelector('#btngenerar')) return false;
+    if (/comprobante\s+generado/i.test(document.body?.innerText || '')) return true;
+    return [...document.querySelectorAll('input[type=button]')].some((b) => /imprimir/i.test(b.value || ''));
+}
+
+// Espera el desenlace de la generación sin navegar. Devuelve true (generado),
+// 'error' (ARCA mostró un error) o false (se acabó el tiempo sin señal).
+async function waitForGenerated({ timeout = 90000, interval = 400 } = {}) {
+    const start = Date.now();
+    for (;;) {
+        if (isGenerated()) return true;
+        const err = afipError() || fatalPageError();
+        if (err) return 'error';
+        if (Date.now() - start >= timeout) return false;
+        await sleep(interval);
+    }
+}
+
+async function finishGenerated(state, inv, { timeout = 90000 } = {}) {
+    const outcome = await waitForGenerated({ timeout });
+    if (outcome === 'error') {
+        const msg = afipError() || fatalPageError() || 'ARCA mostró un error al generar';
+        if (isFatalMessage(msg)) await pauseBatch(state, msg);
+        else await failCurrent(state, inv, msg);
+        return;
+    }
+    if (!outcome) {
+        // Sin señal clara NO se avanza ni se reintenta solo: reintentar acá es
+        // exactamente cómo se duplica una factura.
+        renderStuckPanel(state, inv, 'ARCA no confirmó que el comprobante se haya generado.');
+        return;
+    }
+    // NUNCA "Imprimir": navega la pestaña al PDF y mata el batch.
     const captured = await capturePdf(inv);
     await completeCurrent(state, inv, 'ok', captured ? null : 'Generada, pero no pude capturar el PDF');
 }
@@ -340,11 +404,33 @@ function waitForDialogConfirm({ timeout = 6000 } = {}) {
 // HTML, armamos la URL nosotros y el fetch viaja con las cookies de la sesión.
 // El base64 queda en chrome.storage.local (key `invoicePdfs`) para que el
 // driver de ML lo suba, y de paso se descarga como facturas-arca/{orderId}.pdf.
+// El id del comprobante recién generado vive en una GLOBAL de la página
+// (`var idComprobante;` que rellena el AJAX de generarComprobante). El content
+// script corre en otro mundo y no la ve: se le pide a la página que la copie a
+// un atributo del <html> con un <script> inline (ARCA no manda CSP que lo
+// frene). Plan B: que haya quedado escrita en el HTML.
+function readIdComprobante() {
+    try {
+        const attr = 'data-pa-idcomprobante';
+        document.documentElement.removeAttribute(attr);
+        const s = document.createElement('script');
+        s.textContent = `document.documentElement.setAttribute(${JSON.stringify(attr)}, String(typeof idComprobante !== 'undefined' && idComprobante ? idComprobante : ''));`;
+        document.documentElement.appendChild(s);
+        s.remove();
+        const v = document.documentElement.getAttribute(attr);
+        if (/^\d+$/.test(v || '')) return v;
+    } catch (e) {
+        console.warn('[ARCA driver] no pude leer idComprobante de la página', e);
+    }
+    const idm = document.documentElement.innerHTML.match(/idComprobante\s*=\s*['"]?(\d+)/);
+    return idm ? idm[1] : null;
+}
+
 async function capturePdf(inv) {
     try {
-        const idm = document.documentElement.innerHTML.match(/idComprobante\s*=\s*['"]?(\d+)/);
-        if (!idm) return false;
-        const url = new URL(`imprimirComprobante.do?c=${idm[1]}`, location.href).href;
+        const id = readIdComprobante();
+        if (!id) return false;
+        const url = new URL(`imprimirComprobante.do?c=${id}`, location.href).href;
         // Timeout: ARCA a veces deja el request colgado para siempre y el batch
         // muere acá. Abortar corta también la lectura del body; cae al catch,
         // devuelve false y la factura sigue como "generada sin PDF".
@@ -386,6 +472,8 @@ async function shiftAndGoNext(inv, status, detail) {
 }
 const completeCurrent = (state, inv, status, detail) => shiftAndGoNext(inv, status, detail);
 const failCurrent = (state, inv, detail) => shiftAndGoNext(inv, 'error', detail);
+// "Saltar" apretado por una persona: no es un error, pero tampoco quedó hecha.
+const skipCurrent = (state, inv) => shiftAndGoNext(inv, 'skipped', 'Saltada a mano');
 
 // Freno de mano: deja la cola intacta (no consume la factura en curso) y espera
 // a que el humano arregle la config en el admin y reanude.
@@ -420,7 +508,7 @@ function progressOf(state) {
     return { done, left, total: done + left };
 }
 
-function renderPanel(state, inv) {
+function renderPanel(state, inv, note) {
     const el = ensurePanel();
     const { done, total } = progressOf(state);
     const tipo = invoiceType(inv, state.config || {});
@@ -428,6 +516,7 @@ function renderPanel(state, inv) {
         <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Facturando ${done + 1}/${total}</div>
         <div style="opacity:.85">Orden <b>${inv.orderId}</b> · Factura ${tipo}</div>
         <div style="opacity:.85">Doc ${onlyDigits(inv.clientId)} · $${Number(inv.total).toFixed(2)}</div>
+        ${note ? `<div style="margin-top:6px;opacity:.8">${note}</div>` : ''}
         <div style="margin-top:10px;display:flex;gap:8px">
             <button id="pa-pause" style="${btnStyle('#333')}">Pausar</button>
             <button id="pa-cancel" style="${btnStyle('#7a1f1f')}">Cancelar</button>
@@ -482,18 +571,53 @@ function renderConfirmPanel(state, inv) {
             <button id="pa-gen" style="${btnStyle('#1f7a3a')}">Generar</button>
             <button id="pa-skip" style="${btnStyle('#7a1f1f')}">Saltar</button>
         </div>`;
-    el.querySelector('#pa-gen').onclick = () => document.querySelector('#btngenerar')?.click();
-    el.querySelector('#pa-skip').onclick = () => failCurrent(state, inv, 'Saltada manualmente');
+    // La persona ya revisó: se genera, se confirma el modal y se espera el
+    // desenlace en la misma página (ARCA no navega al generar).
+    el.querySelector('#pa-gen').onclick = () => generateAndFinish(state, inv);
+    el.querySelector('#pa-skip').onclick = () => skipCurrent(state, inv);
+}
+
+// ARCA no dio señal de generación (o no abrió el modal). No se reintenta solo.
+function renderStuckPanel(state, inv, reason) {
+    const el = ensurePanel();
+    const { done, total } = progressOf(state);
+    el.innerHTML = `
+        <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Mirá ARCA ${done + 1}/${total}</div>
+        <div style="opacity:.85">Orden <b>${inv.orderId}</b> · $${Number(inv.total).toFixed(2)}</div>
+        <div style="margin-top:8px;padding:8px;background:#2a1414;border-radius:8px;color:#ff8a8a">${reason}</div>
+        <div style="margin-top:6px;opacity:.8">Fijate en la pantalla si el comprobante salió. No la vuelvo a generar sola.</div>
+        <div style="margin-top:10px;display:flex;gap:8px">
+            <button id="pa-done" style="${btnStyle('#1f7a3a')}">Salió, seguir</button>
+            <button id="pa-retry" style="${btnStyle('#333')}">No salió, rehacer</button>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+            <button id="pa-skip" style="${btnStyle('#333')}">Saltar esta</button>
+            <button id="pa-cancel" style="${btnStyle('#7a1f1f')}">Cancelar</button>
+        </div>`;
+    el.querySelector('#pa-done').onclick = async () => {
+        const captured = await capturePdf(inv);
+        await completeCurrent(state, inv, 'ok', captured ? null : 'Generada, pero no pude capturar el PDF');
+    };
+    el.querySelector('#pa-retry').onclick = async () => {
+        const s = (await getState()) || state;
+        s.step = 0;
+        s.manual = false;
+        await setState(s);
+        location.href = START_URL;
+    };
+    el.querySelector('#pa-skip').onclick = () => skipCurrent(state, inv);
+    el.querySelector('#pa-cancel').onclick = cancelAll;
 }
 
 function renderDonePanel(state) {
     const el = ensurePanel();
     const results = state.results || [];
     const ok = results.filter((r) => r.status === 'ok').length;
-    const err = results.length - ok;
+    const skipped = results.filter((r) => r.status === 'skipped').length;
+    const err = results.length - ok - skipped;
     el.innerHTML = `
         <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Listo ✅</div>
-        <div>${ok} facturadas${err ? ` · <span style="color:#ff8a8a">${err} con error</span>` : ''}</div>
+        <div>${ok} facturadas${skipped ? ` · ${skipped} saltada${skipped === 1 ? '' : 's'}` : ''}${err ? ` · <span style="color:#ff8a8a">${err} con error</span>` : ''}</div>
         ${err ? `<div style="margin-top:6px;max-height:120px;overflow:auto;opacity:.8">${results.filter((r) => r.status === 'error').map((r) => `· ${r.orderId}: ${r.detail || 'error'}`).join('<br>')}</div>` : ''}
         <div style="margin-top:10px"><button id="pa-close" style="${btnStyle('#333')}">Cerrar</button></div>`;
     el.querySelector('#pa-close').onclick = async () => {
@@ -527,8 +651,14 @@ function renderUnknownPanel(state, inv) {
         location.href = START_URL;
     };
     el.querySelector('#pa-cancel').onclick = cancelAll;
-    el.querySelector('#pa-done').onclick = () => inv && shiftAndGoNext(inv, 'ok', 'Generada (confirmada a mano)');
-    el.querySelector('#pa-skip').onclick = () => inv && shiftAndGoNext(inv, 'error', 'Saltada manualmente');
+    el.querySelector('#pa-done').onclick = async () => {
+        if (!inv) return;
+        // Si todavía estamos parados en el comprobante generado, el PDF se
+        // puede rescatar; si no, queda marcada ok sin PDF (se sube a mano).
+        const captured = isGenerated() ? await capturePdf(inv) : false;
+        await shiftAndGoNext(inv, 'ok', captured ? 'Confirmada a mano' : 'Confirmada a mano, sin PDF');
+    };
+    el.querySelector('#pa-skip').onclick = () => inv && shiftAndGoNext(inv, 'skipped', 'Saltada a mano');
 }
 
 // Estamos en AFIP pero fuera del comprobante en línea: típicamente la sesión se
@@ -595,7 +725,7 @@ function renderManualPanel(state, inv) {
         }
     };
     el.querySelector('#pa-cancel').onclick = cancelAll;
-    el.querySelector('#pa-skip').onclick = () => failCurrent(state, inv, 'Saltada manualmente');
+    el.querySelector('#pa-skip').onclick = () => skipCurrent(state, inv);
 }
 
 // Guardia del botón "< Volver" de ARCA: antes de que el botón haga lo suyo se
@@ -658,6 +788,18 @@ async function runStep(href, inv, cfg, state) {
     else if (href.includes('gen_com_datos_receptor_bc_extra.jsp')) await stepReceptorExtra(inv);
     else if (href.includes('genComDatosOperacion.do')) await stepOperacion(inv, cfg);
     else if (href.includes('genComResumenDatos.do')) await stepResumen(inv, state);
+    else if (href.includes('index_bis.jsp')) stepEmpresa(state, inv);
+    else if (href.includes('menu_ppal.jsp')) location.href = START_URL;
+    else renderUnknownPanel(state, inv);
+}
+
+// "Seleccione la Empresa a representar": es la primera pantalla después del
+// login. Con una sola empresa se entra sola; con varias, que elija la persona
+// (el CUIT que factura importa).
+function stepEmpresa(state, inv) {
+    const btns = [...document.querySelectorAll('input[type=button], input[type=submit], button')]
+        .filter((b) => b.offsetParent !== null && !/salir/i.test(b.value || b.textContent || ''));
+    if (btns.length === 1) btns[0].click();
     else renderUnknownPanel(state, inv);
 }
 
