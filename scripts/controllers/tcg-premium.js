@@ -34,6 +34,12 @@ const TCGPremium = {
             case 'startMlUpload':
                 this.startMlUpload(data);
                 break;
+            case 'loadArcaConsulta':
+                this.loadArcaConsulta(data);
+                break;
+            case 'getArcaConsulta':
+                this.sendArcaConsulta();
+                break;
         }
     },
 
@@ -129,6 +135,25 @@ const TCGPremium = {
                 event: 'mlUploadStarted',
                 count: pending.length
             });
+        } catch { }
+    },
+
+    // "Cruzar con ARCA": el admin pide los comprobantes emitidos en un rango del
+    // punto de venta. Queda como pedido pendiente en storage; el driver de ARCA
+    // (all.js) lo resuelve en la pantalla de Consultas cuando no hay batch
+    // corriendo y deja las filas en el mismo objeto (status 'done').
+    async loadArcaConsulta({ desde, hasta, puntoDeVenta, seller = null }) {
+        const req = { status: 'pending', desde, hasta, puntoDeVenta, seller, rows: [], pages: 0, at: Date.now() };
+        await chrome.storage.local.set({ arcaConsulta: req });
+        try {
+            window.postMessage({ target: 'tcg-premium-admin', event: 'arcaConsultaLoaded' });
+        } catch { }
+    },
+
+    async sendArcaConsulta() {
+        const { arcaConsulta } = await chrome.storage.local.get('arcaConsulta');
+        try {
+            window.postMessage({ target: 'tcg-premium-admin', event: 'arcaConsulta', consulta: arcaConsulta || null });
         } catch { }
     },
 

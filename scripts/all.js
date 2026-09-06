@@ -565,11 +565,15 @@ function readIdInline() {
     return idm ? idm[1] : null;
 }
 
+// Id interno de ARCA del último comprobante generado (va al resultado).
+let lastIdComprobante = null;
+
 // Devuelve true si capturó; si no, un string con el motivo (va al detalle).
 async function capturePdf(inv) {
     const why = [];
     try {
         const id = await readIdComprobante(why);
+        lastIdComprobante = id;
         if (!id) {
             console.warn('[ARCA driver] sin idComprobante: no capturo el PDF de', inv.orderId, why);
             return `sin idComprobante (${why.join(' ')})`;
@@ -611,16 +615,24 @@ async function capturePdf(inv) {
 }
 
 // ----------------------------------------------------- avanzar / terminar ----
-async function shiftAndGoNext(inv, status, detail) {
+// Título del comprobante según ARCA ("FACTURA B", 'FACTURA A con Leyenda "Pago
+// en CBU Informada"'). Va al resultado: el admin lo muestra y una leyenda
+// inesperada se ve sin abrir el PDF.
+function comprobanteTitle() {
+    const m = (document.body?.innerText || '').match(/GENERACI[ÓO]N DE COMPROBANTES\s*-\s*([^\n]+)/i);
+    return m ? m[1].trim() : null;
+}
+
+async function shiftAndGoNext(inv, status, detail, extra = {}) {
     const fresh = (await getState()) || {};
-    fresh.results = [...(fresh.results || []), { orderId: inv.orderId, status, detail: detail || null, at: Date.now() }];
+    fresh.results = [...(fresh.results || []), { orderId: inv.orderId, status, detail: detail || null, at: Date.now(), ...extra }];
     fresh.queue = (fresh.queue || []).slice(1);
     fresh.step = 0;
     fresh.manual = false;
     await setState(fresh);
     location.href = START_URL;
 }
-const completeCurrent = (state, inv, status, detail) => shiftAndGoNext(inv, status, detail);
+const completeCurrent = (state, inv, status, detail) => shiftAndGoNext(inv, status, detail, { tipo: comprobanteTitle(), idComprobante: lastIdComprobante || null });
 const failCurrent = (state, inv, detail) => shiftAndGoNext(inv, 'error', detail);
 // "Saltar" apretado por una persona: no es un error, pero tampoco quedó hecha.
 const skipCurrent = (state, inv) => shiftAndGoNext(inv, 'skipped', 'Saltada a mano');
@@ -711,12 +723,65 @@ function renderPausedPanel(state) {
     el.querySelector('#pa-cancel').onclick = cancelAll;
 }
 
+// Lo que ARCA muestra en el resumen (paso 4), leído de la página: así la
+// revisión se hace en el panel sin recorrer la pantalla. Cada campo sale de
+// la línea "Etiqueta valor" del texto; si ARCA cambia el layout, queda vacío.
+function readResumen() {
+    const text = document.body?.innerText || '';
+    const line = (label) => {
+        const m = text.match(new RegExp(`^\\s*${label}\\s+(.+)$`, 'mi'));
+        return m ? m[1].trim() : '';
+    };
+    const doc = text.match(/^\s*(CUIT|CUIL|DNI|Pasaporte|CDI|LE|LC)\s+(\d[\d.\-]*)\s*$/mi);
+    return {
+        titulo: comprobanteTitle() || '',
+        pv: line('Punto de Venta'),
+        docTipo: doc ? doc[1].toUpperCase() : '',
+        doc: doc ? onlyDigits(doc[2]) : '',
+        razonSocial: (text.match(/^\s*Razón Social\s+(.+)$/gmi) || []).map((l) => l.replace(/^\s*Razón Social\s+/i, '').trim())[1] || '',
+        condicionIva: line('Condición frente al IVA'),
+        condicionVenta: line('Condiciones de Venta'),
+        neto: line('Importe Neto Gravado:'),
+        iva21: line('IVA 21%:'),
+        ivaContenido: line('IVA Contenido:'),
+        total: line('Importe Total:'),
+    };
+}
+
+const money = (n) => Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 function renderConfirmPanel(state, inv) {
     const el = ensurePanel();
     const { done, total } = progressOf(state);
+    const tipo = invoiceType(inv, state.config || {});
+    const r = readResumen();
+    // El título de ARCA tiene que ser el tipo pedido. Una leyenda ("con Leyenda
+    // 'Pago en CBU Informada'", RG 1575 para RI nuevos) o una letra distinta se
+    // marcan en rojo: es lo primero que hay que mirar antes de generar.
+    const esperado = new RegExp(`^factura\\s*${tipo}\\b`, 'i');
+    const tituloOk = !r.titulo || esperado.test(r.titulo);
+    const leyenda = /leyenda/i.test(r.titulo);
+    const totalOk = !r.total || Math.abs(Number(String(r.total).replace(/[$\s.]/g, '').replace(',', '.')) - Number(inv.total)) < 0.01;
+    const fila = (k, v, warn) => v ? `<div style="display:flex;gap:8px;justify-content:space-between${warn ? ';color:#ff8a8a' : ''}"><span style="opacity:.6">${k}</span><span style="text-align:right">${v}</span></div>` : '';
     el.innerHTML = `
         <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Revisá la factura ${done + 1}/${total}</div>
-        <div style="opacity:.85">Orden <b>${inv.orderId}</b> · Factura ${invoiceType(inv, state.config || {})} · $${Number(inv.total).toFixed(2)}</div>
+        <div style="opacity:.85">Orden <b>${inv.orderId}</b> · pedida Factura ${tipo} · $${money(inv.total)}</div>
+        ${inv.name ? `<div style="opacity:.7">${inv.name}</div>` : ''}
+        <div style="margin-top:8px;padding:8px;background:#151526;border-radius:8px;font-size:12px;line-height:1.5">
+            ${fila('ARCA', r.titulo, !tituloOk || leyenda)}
+            ${fila('PV', r.pv, false)}
+            ${fila(r.docTipo || 'Doc', r.doc, false)}
+            ${fila('Receptor', r.razonSocial, false)}
+            ${fila('IVA', r.condicionIva, false)}
+            ${fila('Venta', r.condicionVenta, false)}
+            ${fila('Neto', r.neto, false)}
+            ${fila('IVA 21%', r.iva21, false)}
+            ${fila('IVA cont.', r.ivaContenido, false)}
+            ${fila('Total', r.total, !totalOk)}
+        </div>
+        ${!tituloOk ? `<div style="margin-top:6px;color:#ff8a8a">ARCA armó otro tipo de comprobante que el pedido.</div>` : ''}
+        ${leyenda ? `<div style="margin-top:6px;color:#ffb86b">Lleva leyenda: es lo que ARCA habilita para este CUIT/punto de venta.</div>` : ''}
+        ${!totalOk ? `<div style="margin-top:6px;color:#ff8a8a">El total de ARCA no es el de la venta.</div>` : ''}
         <div style="margin-top:10px;display:flex;gap:8px">
             <button id="pa-gen" style="${btnStyle('#1f7a3a')}">Generar</button>
             <button id="pa-skip" style="${btnStyle('#7a1f1f')}">Saltar</button>
@@ -953,6 +1018,155 @@ function stepEmpresa(state, inv) {
     else renderUnknownPanel(state, inv);
 }
 
+// ------------------------------------------------- consulta de ARCA -----
+// "Cruzar con ARCA": el admin pide los comprobantes emitidos en un rango
+// (Consultas → Consulta de comprobantes) para cruzarlos por documento +
+// importe contra las ventas y marcar las que ya están facturadas sin que
+// una persona tenga que mirar la tabla. Pedido y resultado viven en
+// chrome.storage.local bajo `arcaConsulta`:
+//   { status: 'pending'|'done'|'error', desde, hasta, puntoDeVenta, rows, pages, error, at }
+// El driver, sin batch activo, lleva la pestaña a la pantalla de consulta,
+// llena el formulario, aprieta Buscar y junta las filas (siguiendo el
+// paginador si lo hay). Cada fila: { fecha, tipo, nro, docTipo, doc, cae, importe }.
+const CONSULTA_KEY = 'arcaConsulta';
+const CONSULTA_URL = '/rcel/jsp/filtrarComprobantesGenerados.do';
+const getConsulta = () => chrome.storage.local.get(CONSULTA_KEY).then((r) => r[CONSULTA_KEY] || null);
+const setConsulta = (c) => chrome.storage.local.set({ [CONSULTA_KEY]: c });
+
+// Input de texto que sigue a una etiqueta ("Desde", "Hasta"). ARCA no les pone
+// id estable a los campos de fecha, así que se buscan por el texto de al lado.
+function inputAfterLabel(label) {
+    const re = new RegExp(`^\\s*${label}\\s*:?\\s*$`, 'i');
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (!re.test(n.textContent)) continue;
+        let el = n.parentElement;
+        for (let up = 0; el && up < 4; up++, el = el.parentElement) {
+            const cand = [...el.querySelectorAll('input[type=text]')];
+            if (cand.length) return cand[0];
+            const sib = el.nextElementSibling;
+            if (sib?.matches?.('input[type=text]')) return sib;
+            const inner = sib?.querySelector?.('input[type=text]');
+            if (inner) return inner;
+        }
+    }
+    return null;
+}
+
+async function consultaFill(c) {
+    const texts = [...document.querySelectorAll('input[type=text]')];
+    const desde = inputAfterLabel('Desde') || texts[0];
+    const hasta = inputAfterLabel('Hasta') || texts[1];
+    if (!desde || !hasta) throw new Error('No encontré los campos de fecha de la consulta');
+    setValue(desde, c.desde);
+    setValue(hasta, c.hasta);
+    // El select del punto de venta es el que tiene una opción con ese número
+    // (el de tipo de comprobante tiene "Factura A", "Factura B"…).
+    const pv = onlyDigits(c.puntoDeVenta || '');
+    if (pv) {
+        const sel = [...document.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value && onlyDigits(o.value) === pv));
+        if (sel) setPuntoDeVenta(sel, pv);
+    }
+    await sleep(300);
+    const btn = [...document.querySelectorAll('input[type=button], input[type=submit], button')].find((b) => /buscar/i.test(b.value || b.textContent || ''));
+    if (!btn) throw new Error('No encontré el botón Buscar de la consulta');
+    btn.click();
+}
+
+const DATE_RE = /^\d{2}\/\d{2}\/\d{4}$/;
+function consultaParseRows() {
+    const rows = [];
+    for (const tr of document.querySelectorAll('tr')) {
+        const cells = [...tr.children].filter((td) => /^t[dh]$/i.test(td.tagName)).map((td) => td.innerText.trim());
+        if (cells.length < 7 || !DATE_RE.test(cells[0])) continue;
+        const ver = tr.querySelector('a[href*="imprimir"], a[href*="Comprobante"], input[onclick*="imprimir"]');
+        const href = ver?.getAttribute?.('href') || ver?.getAttribute?.('onclick') || '';
+        const idm = href.match(/c=(\d+)/);
+        const imp = String(cells[6]).trim();
+        // ARCA lista "26909.99" (punto decimal); si alguna vez viene "26.909,99" también se lee.
+        const importe = /,\d{1,2}$/.test(imp) ? Number(imp.replace(/\./g, '').replace(',', '.')) : Number(imp.replace(/,/g, ''));
+        rows.push({
+            fecha: cells[0],
+            tipo: cells[1],
+            nro: cells[2],
+            docTipo: cells[3],
+            doc: onlyDigits(cells[4]),
+            cae: onlyDigits(cells[5]),
+            importe: Number.isFinite(importe) ? importe : 0,
+            idComprobante: idm ? idm[1] : null,
+        });
+    }
+    return rows;
+}
+
+// Paginador (si ARCA lo muestra): "Siguiente", "Próxima", ">" o ">>".
+function consultaNextPage() {
+    const cands = [...document.querySelectorAll('a, input[type=button], input[type=submit], button')]
+        .filter((el) => el.offsetParent !== null && !el.disabled)
+        .filter((el) => /^(siguiente|pr[oó]xim[ao]|>|>>|»)\s*$/i.test((el.value || el.textContent || '').trim()));
+    return cands[0] || null;
+}
+
+async function consultaCollect(c) {
+    const rows = consultaParseRows();
+    const seen = new Set((c.rows || []).map((r) => `${r.nro}|${r.tipo}`));
+    const fresh = rows.filter((r) => !seen.has(`${r.nro}|${r.tipo}`));
+    c.rows = [...(c.rows || []), ...fresh];
+    c.pages = (c.pages || 0) + 1;
+    const next = fresh.length && c.pages < 200 ? consultaNextPage() : null;
+    if (next) {
+        await setConsulta(c);
+        next.click();
+        return;
+    }
+    c.status = 'done';
+    c.at = Date.now();
+    await setConsulta(c);
+    renderConsultaPanel(c);
+}
+
+function renderConsultaPanel(c) {
+    const el = ensurePanel();
+    const n = (c.rows || []).length;
+    el.innerHTML = `
+        <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Consulta lista ✅</div>
+        <div style="opacity:.85">${n} comprobante${n === 1 ? '' : 's'} del PV ${c.puntoDeVenta || '—'} entre ${c.desde} y ${c.hasta}.</div>
+        <div style="margin-top:6px;opacity:.8">Volvé al admin: ahí se cruzan contra las ventas y se marcan solas.</div>
+        <div style="margin-top:10px"><button id="pa-close" style="${btnStyle('#333')}">Cerrar</button></div>`;
+    el.querySelector('#pa-close').onclick = () => el.remove();
+}
+
+function renderConsultaBusy(note) {
+    const el = ensurePanel();
+    el.innerHTML = `
+        <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Consultando ARCA…</div>
+        <div style="opacity:.85">${note}</div>`;
+}
+
+// Devuelve true si esta carga de página la consumió la consulta.
+async function runConsulta(c) {
+    const href = location.href;
+    try {
+        if (href.includes('filtrarComprobantesGenerados.do')) {
+            renderConsultaBusy(`Buscando comprobantes del PV ${c.puntoDeVenta || '—'} entre ${c.desde} y ${c.hasta}.`);
+            await consultaFill(c);
+        } else if (href.includes('buscarComprobantesGenerados.do')) {
+            renderConsultaBusy('Leyendo la tabla…');
+            await consultaCollect(c);
+        } else if (href.includes('index_bis.jsp')) {
+            stepEmpresa({ results: [], queue: [{}] }, null);
+        } else {
+            location.href = CONSULTA_URL;
+        }
+    } catch (e) {
+        console.error('[ARCA consulta]', e);
+        c.status = 'error';
+        c.error = e.message;
+        await setConsulta(c);
+    }
+    return true;
+}
+
 // ------------------------------------------------------------------ main -----
 (async function main() {
     if (!ON_AFIP) return;
@@ -963,6 +1177,14 @@ function stepEmpresa(state, inv) {
         enCola: state?.queue?.length ?? 0,
         activo: Boolean(state?.active),
     });
+    // "Cruzar con ARCA" pendiente y sin batch corriendo: esta pestaña se usa
+    // para la consulta. Con un batch activo, la consulta espera a que termine.
+    const consulta = ON_RCEL ? await getConsulta() : null;
+    const consultaViva = consulta?.status === 'pending' && Date.now() - (consulta.at || 0) < 2 * 3600 * 1000;
+    if (consultaViva && !(state?.active && state.queue?.length)) {
+        await runConsulta(consulta);
+        return;
+    }
     if (!state) {
         if (ON_RCEL) renderIdleBadge(); // sin batch, pero avisamos que estamos vivos
         return;
