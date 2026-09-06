@@ -37,6 +37,15 @@ const TCGPremium = {
             case 'getMlUploadResults':
                 this.sendMlUploadResults();
                 break;
+            case 'loadPdfRecovery':
+                this.loadPdfRecovery(data);
+                break;
+            case 'getPdfRecovery':
+                this.sendPdfRecovery();
+                break;
+            case 'getInvoicePdfIds':
+                this.sendInvoicePdfIds(data);
+                break;
             case 'loadArcaConsulta':
                 this.loadArcaConsulta(data);
                 break;
@@ -151,6 +160,39 @@ const TCGPremium = {
                 event: 'mlUploadStarted',
                 count: pending.length
             });
+        } catch { }
+    },
+
+    // Recuperar PDFs desde ARCA: lista de {orderId, idComprobante, seller,
+    // mlOrderId}; el driver de ARCA (all.js) los baja en cualquier página del
+    // RCEL con sesión y los deja en invoicePdfs.
+    async loadPdfRecovery({ items = [] }) {
+        const req = { status: 'pending', items, done: 0, errors: [], at: Date.now() };
+        await chrome.storage.local.set({ pdfRecovery: req });
+        try {
+            window.postMessage({ target: 'tcg-premium-admin', event: 'pdfRecoveryLoaded', count: items.length });
+        } catch { }
+    },
+
+    async sendPdfRecovery() {
+        const { pdfRecovery } = await chrome.storage.local.get('pdfRecovery');
+        try {
+            window.postMessage({ target: 'tcg-premium-admin', event: 'pdfRecovery', recovery: pdfRecovery || null });
+        } catch { }
+    },
+
+    // Todos los ids con PDF guardado de una cuenta (subidos o no), para que el
+    // admin sepa a cuáles les falta el archivo.
+    async sendInvoicePdfIds({ seller } = {}) {
+        const { invoicePdfs = {} } = await chrome.storage.local.get('invoicePdfs');
+        const wanted = seller || 'pokeargentum';
+        const ids = Object.keys(invoicePdfs).filter((id) => {
+            const e = invoicePdfs[id];
+            return e?.dataUrl && (e.seller || 'konekotekka') === wanted;
+        });
+        const uploaded = ids.filter((id) => invoicePdfs[id].uploaded);
+        try {
+            window.postMessage({ target: 'tcg-premium-admin', event: 'invoicePdfIds', ids, uploaded });
         } catch { }
     },
 

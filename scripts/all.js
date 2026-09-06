@@ -421,6 +421,15 @@ async function stepResumen(inv, state) {
     }
 
     if (genBtn) {
+        // Red de seguridad en automático: lo que ARCA armó tiene que ser el
+        // tipo pedido y el total de la venta. Si no, NO se genera: se frena y
+        // que una persona mire (una factura mal emitida sólo se arregla con
+        // una nota de crédito).
+        const problema = resumenMismatch(inv, state.config || {});
+        if (problema) {
+            renderStuckPanel(state, inv, `No generé: ${problema}`);
+            return;
+        }
         await generateAndFinish(state, inv);
         return;
     }
@@ -760,6 +769,31 @@ function readResumen() {
 
 const money = (n) => Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// "$ 35.019,99" → 35019.99
+const parseMoney = (s) => Number(String(s || '').replace(/[$\s.]/g, '').replace(',', '.'));
+
+// Qué no cierra entre el resumen de ARCA y la venta (null si todo bien). El
+// centavo de tolerancia es por la Factura A cuyo neto no cierra a 2 decimales.
+function resumenMismatch(inv, cfg) {
+    const r = readResumen();
+    const tipo = invoiceType(inv, cfg);
+    if (r.titulo && !new RegExp(`^factura\\s*${tipo}\\b`, 'i').test(r.titulo)) {
+        return `ARCA armó "${r.titulo}" y la venta pedía Factura ${tipo}`;
+    }
+    if (r.total) {
+        const t = parseMoney(r.total);
+        if (Number.isFinite(t) && Math.abs(t - Number(inv.total)) > 0.015) {
+            return `el total de ARCA (${r.total}) no es el de la venta ($${money(inv.total)})`;
+        }
+    }
+    const doc = onlyDigits(inv.clientId).replace(/^0+/, '');
+    const rdoc = String(r.doc || '').replace(/^0+/, '');
+    if (rdoc && doc && rdoc !== doc && !(doc.length === 11 && doc.slice(2, 10) === rdoc)) {
+        return `el documento del resumen (${r.doc}) no es el de la venta (${onlyDigits(inv.clientId)})`;
+    }
+    return null;
+}
+
 function renderConfirmPanel(state, inv) {
     const el = ensurePanel();
     const { done, total } = progressOf(state);
@@ -1028,6 +1062,73 @@ function stepEmpresa(state, inv) {
     else renderUnknownPanel(state, inv);
 }
 
+// ------------------------------------------------ recuperar PDFs -----
+// Comprobantes emitidos sin captura del PDF (el batch de konekotekka del
+// 2026-09-05 dejó ~41 así). El admin manda la lista {orderId, idComprobante,
+// seller, mlOrderId} —el id interno lo trae la tabla de Consultas— y acá, en
+// cualquier página del RCEL con sesión, se baja imprimirComprobante.do?c=ID
+// y se guarda en invoicePdfs como si lo hubiera capturado el driver.
+//   pdfRecovery: { status: 'pending'|'done', items: [...], done: n, errors: [{orderId, error}], at }
+const RECOVERY_KEY = 'pdfRecovery';
+const getRecovery = () => chrome.storage.local.get(RECOVERY_KEY).then((r) => r[RECOVERY_KEY] || null);
+const setRecovery = (r) => chrome.storage.local.set({ [RECOVERY_KEY]: r });
+
+async function fetchPdfDataUrl(idComprobante) {
+    const url = new URL(`/rcel/jsp/imprimirComprobante.do?c=${idComprobante}`, location.href).href;
+    const res = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(20000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = await res.arrayBuffer();
+    const head = new Uint8Array(buf.slice(0, 4));
+    if (String.fromCharCode(...head) !== '%PDF') throw new Error('la descarga no era un PDF');
+    let bin = '';
+    const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return `data:application/pdf;base64,${btoa(bin)}`;
+}
+
+async function runRecovery(rec) {
+    const el = ensurePanel();
+    const items = rec.items || [];
+    rec.done = rec.done || 0;
+    rec.errors = rec.errors || [];
+    for (let i = rec.done; i < items.length; i++) {
+        const it = items[i];
+        el.innerHTML = `
+            <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Recuperando PDFs ${i + 1}/${items.length}</div>
+            <div style="opacity:.85">Venta <b>${it.orderId}</b> · comprobante ${it.idComprobante}</div>`;
+        try {
+            const { invoicePdfs = {} } = await chrome.storage.local.get('invoicePdfs');
+            if (!invoicePdfs[it.orderId]?.dataUrl) {
+                const dataUrl = await fetchPdfDataUrl(it.idComprobante);
+                invoicePdfs[it.orderId] = {
+                    dataUrl,
+                    at: Date.now(),
+                    uploaded: false,
+                    seller: it.seller || null,
+                    mlOrderId: it.mlOrderId || null,
+                    recovered: true,
+                };
+                await chrome.storage.local.set({ invoicePdfs });
+            }
+        } catch (e) {
+            rec.errors.push({ orderId: it.orderId, error: e?.message || String(e) });
+        }
+        rec.done = i + 1;
+        await setRecovery(rec);
+        await sleep(400); // no ametrallar a ARCA
+    }
+    rec.status = 'done';
+    rec.at = Date.now();
+    await setRecovery(rec);
+    const ok = items.length - rec.errors.length;
+    el.innerHTML = `
+        <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">PDFs recuperados ✅</div>
+        <div>${ok} de ${items.length}${rec.errors.length ? ` · <span style="color:#ff8a8a">${rec.errors.length} con error</span>` : ''}</div>
+        <div style="margin-top:6px;opacity:.8">Ya se pueden subir a ML desde el admin.</div>
+        <div style="margin-top:10px"><button id="pa-close" style="${btnStyle('#333')}">Cerrar</button></div>`;
+    el.querySelector('#pa-close').onclick = () => el.remove();
+}
+
 // ------------------------------------------------- consulta de ARCA -----
 // "Cruzar con ARCA": el admin pide los comprobantes emitidos en un rango
 // (Consultas → Consulta de comprobantes) para cruzarlos por documento +
@@ -1200,6 +1301,14 @@ async function runConsulta(c) {
     const consultaViva = consulta?.status === 'pending' && Date.now() - (consulta.at || 0) < 2 * 3600 * 1000;
     if (consultaViva && !(state?.active && state.queue?.length)) {
         await runConsulta(consulta);
+        return;
+    }
+    // Recuperar PDFs pendiente: se hace desde cualquier página del RCEL con
+    // sesión, sin navegar. Igual que la consulta, espera si hay batch activo.
+    const recovery = ON_RCEL ? await getRecovery() : null;
+    if (recovery?.status === 'pending' && Date.now() - (recovery.at || 0) < 2 * 3600 * 1000
+        && !(state?.active && state.queue?.length)) {
+        await runRecovery(recovery);
         return;
     }
     if (!state) {

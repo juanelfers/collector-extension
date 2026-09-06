@@ -150,6 +150,7 @@ async function shiftAndGoNext(orderId, status, detail) {
     fresh.results = [...(fresh.results || []), { orderId, status, detail: detail || null, at: Date.now() }];
     fresh.queue = (fresh.queue || []).slice(1);
     fresh.inFlight = null;
+    if (!fresh.queue.length) fresh.active = false; // terminó: que el admin lo vea como terminada
     await setState(fresh);
     if (fresh.queue.length) {
         location.href = urlFor(fresh.queue[0], await getPdf(fresh.queue[0]));
@@ -254,7 +255,11 @@ function renderDonePanel(state) {
         ${err ? `<div style="margin-top:6px;max-height:120px;overflow:auto;opacity:.8">${results.filter((r) => r.status === 'error').map((r) => `· ${r.orderId}: ${r.detail || 'error'}`).join('<br>')}</div>` : ''}
         <div style="margin-top:10px"><button id="pa-ml-close" style="${btnStyle('#333')}">Cerrar</button></div>`;
     el.querySelector('#pa-ml-close').onclick = async () => {
-        await chrome.storage.local.remove(STORAGE_KEY);
+        // Se conserva el estado (resultados) para el progreso del admin; el
+        // panel no vuelve a aparecer en las páginas de detalle.
+        const s = (await getState()) || state;
+        s.closed = true;
+        await setState(s);
         el.remove();
     };
 }
@@ -305,11 +310,12 @@ async function onDetailPage(state) {
     if (!state) return;
     if (onDetail) {
         if (state.active && state.queue?.length) await onDetailPage(state);
+        else if (!state.queue?.length && state.results?.length && !state.closed) renderDonePanel(state);
         return;
     }
 
     if (!state.queue || !state.queue.length) {
-        if (state.results?.length) renderDonePanel(state);
+        if (state.results?.length && !state.closed) renderDonePanel(state);
         return;
     }
     if (!state.active) {
