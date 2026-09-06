@@ -34,6 +34,9 @@ const TCGPremium = {
             case 'startMlUpload':
                 this.startMlUpload(data);
                 break;
+            case 'getMlUploadResults':
+                this.sendMlUploadResults();
+                break;
             case 'loadArcaConsulta':
                 this.loadArcaConsulta(data);
                 break;
@@ -167,6 +170,23 @@ const TCGPremium = {
         const { arcaConsulta } = await chrome.storage.local.get('arcaConsulta');
         try {
             window.postMessage({ target: 'tcg-premium-admin', event: 'arcaConsulta', consulta: arcaConsulta || null });
+        } catch { }
+    },
+
+    // Cómo va la subida a ML: hechas, en cola, en vuelo. Para el progreso vivo
+    // del admin (y para saber por qué se trabó sin abrir DevTools).
+    async sendMlUploadResults() {
+        const { mlUpload } = await chrome.storage.local.get('mlUpload');
+        try {
+            window.postMessage({
+                target: 'tcg-premium-admin',
+                event: 'mlUploadResults',
+                results: mlUpload?.results || [],
+                pending: mlUpload?.queue?.length || 0,
+                current: mlUpload?.queue?.[0] || null,
+                inFlight: mlUpload?.inFlight || null,
+                active: Boolean(mlUpload?.active)
+            });
         } catch { }
     },
 

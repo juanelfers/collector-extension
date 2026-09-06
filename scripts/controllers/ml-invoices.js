@@ -274,8 +274,16 @@ async function onDetailPage(state) {
     const entry = current ? await getPdf(current) : null;
     const currentMl = entry?.mlOrderId || current;
     const inFlight = state.inFlight?.orderId ? String(state.inFlight.orderId) : null;
-    // Sólo actuamos si esta página es la de la orden en curso.
-    if (!current || urlOrder !== currentMl) return;
+    if (!current) return;
+    // Detalle de OTRA orden: la cola ya avanzó (el driver de adjuntar llegó a
+    // anotar el resultado y a pedir la siguiente, pero ML ganó la carrera con
+    // su propia navegación al detalle) y la pestaña quedó acá, muda. Seguimos
+    // con la orden en curso.
+    if (urlOrder !== currentMl) {
+        console.log('[PokeArgentum] ML subida: detalle de otra orden, sigo con', current);
+        location.href = urlFor(current, entry);
+        return;
+    }
     if (!inFlight && (state.attempts?.[current] || 0) === 0) return;
 
     renderPanel(state, current, 'Verificando en el detalle de la venta…');
