@@ -29,10 +29,10 @@ const TCGPremium = {
                 this.sendInvoiceResults();
                 break;
             case 'getInvoicePdfs':
-                this.sendInvoicePdfs();
+                this.sendInvoicePdfs(data);
                 break;
             case 'startMlUpload':
-                this.startMlUpload();
+                this.startMlUpload(data);
                 break;
         }
     },
@@ -83,14 +83,23 @@ const TCGPremium = {
         } catch { }
     },
 
-    // PDFs capturados por el driver de ARCA, pendientes de subir a ML.
-    async pendingPdfIds() {
+    // PDFs capturados por el driver de ARCA, pendientes de subir a ML, de UNA
+    // cuenta. Cada PDF lleva `seller` (la cuenta que facturó). Los que no lo
+    // tienen son del batch de konekotekka del 2026-09-05, anterior a la
+    // etiqueta: se tratan como de konekotekka. Sin `seller` en el pedido
+    // (bridge viejo de pokeargentum.com) se asume pokeargentum.
+    async pendingPdfIds(seller) {
         const { invoicePdfs = {} } = await chrome.storage.local.get('invoicePdfs');
-        return Object.keys(invoicePdfs).filter((id) => invoicePdfs[id]?.dataUrl && !invoicePdfs[id].uploaded);
+        const wanted = seller || 'pokeargentum';
+        return Object.keys(invoicePdfs).filter((id) => {
+            const e = invoicePdfs[id];
+            if (!e?.dataUrl || e.uploaded) return false;
+            return (e.seller || 'konekotekka') === wanted;
+        });
     },
 
-    async sendInvoicePdfs() {
-        const pending = await this.pendingPdfIds();
+    async sendInvoicePdfs({ seller } = {}) {
+        const pending = await this.pendingPdfIds(seller);
         try {
             window.postMessage({
                 target: 'tcg-premium-admin',
@@ -103,8 +112,8 @@ const TCGPremium = {
     // El admin dispara la subida de facturas a ML: armamos la cola con todos
     // los PDFs pendientes y abrimos la primera orden. De ahí en más el driver
     // (ml-invoices.js) encadena solo, orden por orden.
-    async startMlUpload() {
-        const pending = await this.pendingPdfIds();
+    async startMlUpload({ seller } = {}) {
+        const pending = await this.pendingPdfIds(seller);
         if (pending.length) {
             await chrome.storage.local.set({
                 mlUpload: { active: true, queue: pending, results: [], attempts: {} }

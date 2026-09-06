@@ -572,7 +572,10 @@ async function capturePdf(inv) {
         const dataUrl = `data:application/pdf;base64,${btoa(bin)}`;
 
         const { invoicePdfs = {} } = await chrome.storage.local.get('invoicePdfs');
-        invoicePdfs[inv.orderId] = { dataUrl, at: Date.now(), uploaded: false };
+        // `seller`: la cuenta que facturó. La subida a ML filtra por esto para
+        // no adjuntar facturas de konekotekka logueado como pokeargentum.
+        const st = await getState();
+        invoicePdfs[inv.orderId] = { dataUrl, at: Date.now(), uploaded: false, seller: st?.config?.seller || null };
         await chrome.storage.local.set({ invoicePdfs });
         chrome.runtime.sendMessage({ type: 'save-pdf', orderId: inv.orderId, dataUrl });
         console.log('[PokeArgentum] PDF capturado', inv.orderId, `${Math.round(bytes.length / 1024)}KB`);
