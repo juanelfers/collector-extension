@@ -111,6 +111,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
     }
 
+    // "Reanudar" desde el admin: llevar la pestaña de ARCA (o de ML) que ya
+    // está abierta a la URL pedida, para que el driver arranque sin que la
+    // persona tenga que ir a buscarla. Si no hay ninguna, se abre una nueva
+    // (ARCA por el SSO: /rcel/jsp/* en frío da 403).
+    if (message.type === "arca-go" || message.type === "ml-go") {
+        const pattern = message.type === "arca-go" ? "https://fe.afip.gob.ar/*" : "https://vendedores.mercadolibre.com.ar/*";
+        chrome.tabs.query({ url: pattern }, (tabs) => {
+            const tab = tabs && tabs[0];
+            if (tab) {
+                chrome.tabs.update(tab.id, { url: message.url, active: true });
+            } else {
+                const url = message.type === "arca-go"
+                    ? "https://auth.afip.gob.ar/contribuyente_/login.xhtml?action=SYSTEM&system=rcel"
+                    : message.url;
+                chrome.tabs.create({ url });
+            }
+        });
+        return false;
+    }
+
     return false;
 });
 

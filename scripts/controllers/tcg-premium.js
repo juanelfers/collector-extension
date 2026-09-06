@@ -37,6 +37,12 @@ const TCGPremium = {
             case 'getMlUploadResults':
                 this.sendMlUploadResults();
                 break;
+            case 'getStatus':
+                this.sendStatus(data);
+                break;
+            case 'control':
+                this.control(data);
+                break;
             case 'loadPdfRecovery':
                 this.loadPdfRecovery(data);
                 break;
@@ -160,6 +166,114 @@ const TCGPremium = {
                 event: 'mlUploadStarted',
                 count: pending.length
             });
+        } catch { }
+    },
+
+    // Foto completa de lo que está haciendo la extensión, en un solo viaje:
+    // batch de ARCA, subida a ML, cruce, recuperación de PDF y qué PDF hay de
+    // la cuenta. Es lo que el admin muestra en la tarjeta de estado y en la
+    // columna "Estado" de cada venta, polleando cada pocos segundos.
+    async sendStatus({ seller } = {}) {
+        const st = await chrome.storage.local.get(['invoicing', 'mlUpload', 'arcaConsulta', 'pdfRecovery', 'invoicePdfs']);
+        const inv = st.invoicing || null;
+        const ml = st.mlUpload || null;
+        const wanted = seller || 'pokeargentum';
+        const pdfs = st.invoicePdfs || {};
+        const captured = [];
+        const uploaded = [];
+        for (const [id, e] of Object.entries(pdfs)) {
+            if (!e?.dataUrl && !e?.uploaded) continue;
+            if ((e.seller || 'konekotekka') !== wanted) continue;
+            if (e.uploaded) uploaded.push(id);
+            else captured.push(id);
+        }
+        const summarize = (results = []) => ({
+            ok: results.filter((r) => r.status === 'ok').length,
+            errors: results.filter((r) => r.status === 'error').length,
+            skipped: results.filter((r) => r.status === 'skipped').length,
+            lastAt: results.length ? results[results.length - 1].at : null,
+        });
+        const status = {
+            at: Date.now(),
+            invoicing: inv
+                ? {
+                      active: Boolean(inv.active),
+                      mode: inv.mode || 'auto',
+                      pending: inv.queue?.length || 0,
+                      queue: (inv.queue || []).map((q) => q.orderId),
+                      current: inv.queue?.[0] ? { orderId: inv.queue[0].orderId, name: inv.queue[0].name || '', total: inv.queue[0].total } : null,
+                      pauseReason: inv.pauseReason || null,
+                      manual: Boolean(inv.manual),
+                      config: inv.config ? { seller: inv.config.seller || null, fecha: inv.config.fecha, puntoDeVenta: inv.config.puntoDeVenta, tipoComprobante: inv.config.tipoComprobante } : null,
+                      results: inv.results || [],
+                      ...summarize(inv.results),
+                  }
+                : null,
+            mlUpload: ml
+                ? {
+                      active: Boolean(ml.active),
+                      pending: ml.queue?.length || 0,
+                      queue: ml.queue || [],
+                      current: ml.queue?.[0] || null,
+                      inFlight: ml.inFlight || null,
+                      results: ml.results || [],
+                      ...summarize(ml.results),
+                  }
+                : null,
+            consulta: st.arcaConsulta
+                ? { status: st.arcaConsulta.status, rows: st.arcaConsulta.rows?.length || 0, desde: st.arcaConsulta.desde, hasta: st.arcaConsulta.hasta, puntoDeVenta: st.arcaConsulta.puntoDeVenta, error: st.arcaConsulta.error || null, at: st.arcaConsulta.at }
+                : null,
+            recovery: st.pdfRecovery
+                ? { status: st.pdfRecovery.status, done: st.pdfRecovery.done || 0, total: st.pdfRecovery.items?.length || 0, errors: st.pdfRecovery.errors?.length || 0, at: st.pdfRecovery.at }
+                : null,
+            pdfs: { seller: wanted, captured, uploaded },
+        };
+        try {
+            window.postMessage({ target: 'tcg-premium-admin', event: 'status', status });
+        } catch { }
+    },
+
+    // Control desde el admin: pausar / reanudar / cancelar el batch de ARCA o
+    // la subida a ML. El driver de ARCA lee el estado en cada carga de página:
+    // "pausar" frena después de la factura en curso; "reanudar" además le
+    // pide al service worker que lleve la pestaña de ARCA al inicio del
+    // comprobante (si no hay pestaña de ARCA, la abre por el SSO).
+    async control({ target, action }) {
+        const key = target === 'mlUpload' ? 'mlUpload' : 'invoicing';
+        const st = (await chrome.storage.local.get(key))[key];
+        let result = 'ok';
+        if (action === 'cancel') {
+            await chrome.storage.local.remove(key);
+        } else if (!st) {
+            result = 'nada que controlar';
+        } else if (action === 'pause') {
+            st.active = false;
+            await chrome.storage.local.set({ [key]: st });
+        } else if (action === 'resume') {
+            st.active = true;
+            st.pauseReason = null;
+            if (key === 'invoicing') {
+                if (st.attempts && st.queue?.[0]) delete st.attempts[st.queue[0].orderId];
+                st.step = 0;
+                st.manual = false;
+            }
+            await chrome.storage.local.set({ [key]: st });
+            if (st.queue?.length) {
+                if (key === 'invoicing') {
+                    chrome.runtime.sendMessage({ type: 'arca-go', url: 'https://fe.afip.gob.ar/rcel/jsp/buscarPtosVtas.do' });
+                } else {
+                    const { invoicePdfs = {} } = await chrome.storage.local.get('invoicePdfs');
+                    const first = st.queue[0];
+                    const mlId = invoicePdfs[first]?.mlOrderId || first;
+                    chrome.runtime.sendMessage({ type: 'ml-go', url: `https://vendedores.mercadolibre.com.ar/emisor/adjuntar-factura?orders_ids=${mlId}` });
+                }
+            }
+        } else {
+            result = `acción desconocida: ${action}`;
+        }
+        // `target` choca con el campo target del mensaje: va como `which`.
+        try {
+            window.postMessage({ target: 'tcg-premium-admin', event: 'controlResult', which: key, action, result });
         } catch { }
     },
 
