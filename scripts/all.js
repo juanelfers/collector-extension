@@ -1054,18 +1054,25 @@ function inputAfterLabel(label) {
 }
 
 async function consultaFill(c) {
+    // Nombres reales del formulario (vistos 2026-09-05): fechaEmisionDesde,
+    // fechaEmisionHasta, puntoDeVenta, idTipoComprobante, idTipoDocumento. La
+    // etiqueta queda de respaldo por si ARCA los renombra.
     const texts = [...document.querySelectorAll('input[type=text]')];
-    const desde = inputAfterLabel('Desde') || texts[0];
-    const hasta = inputAfterLabel('Hasta') || texts[1];
+    const desde = document.querySelector('[name=fechaEmisionDesde]') || inputAfterLabel('Desde') || texts[0];
+    const hasta = document.querySelector('[name=fechaEmisionHasta]') || inputAfterLabel('Hasta') || texts[1];
     if (!desde || !hasta) throw new Error('No encontré los campos de fecha de la consulta');
     setValue(desde, c.desde);
     setValue(hasta, c.hasta);
-    // El select del punto de venta es el que tiene una opción con ese número
-    // (el de tipo de comprobante tiene "Factura A", "Factura B"…).
+    // OJO: el select de tipo de comprobante también tiene una opción con value
+    // "2" (Nota de Débito A): elegirlo por "tiene una opción con ese número"
+    // buscaba notas de débito y daba 0 (pasó en la primera corrida). Va por
+    // nombre y, de respaldo, por el texto de la opción ("0002-Azcuenaga…").
     const pv = onlyDigits(c.puntoDeVenta || '');
     if (pv) {
-        const sel = [...document.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value && onlyDigits(o.value) === pv));
-        if (sel) setPuntoDeVenta(sel, pv);
+        const sel = document.querySelector('select[name=puntoDeVenta]')
+            || [...document.querySelectorAll('select')].find((s) => [...s.options].some((o) => new RegExp(`^0*${pv}\s*-`).test(o.textContent.trim())));
+        if (!sel) throw new Error(`No encontré el punto de venta ${pv} en la consulta`);
+        setPuntoDeVenta(sel, pv);
     }
     await sleep(300);
     const btn = [...document.querySelectorAll('input[type=button], input[type=submit], button')].find((b) => /buscar/i.test(b.value || b.textContent || ''));
