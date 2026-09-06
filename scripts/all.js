@@ -156,10 +156,38 @@ function findContinue() {
     return [...document.querySelectorAll('input[type=button], input[type=submit], button')]
         .find((b) => /continuar/i.test(b.value || b.textContent || ''));
 }
+// Los alert() de ARCA ("Los siguientes campos son obligatorios…") congelan la
+// pestaña: el driver queda mudo y hasta el DevTools deja de responder. Al
+// cargar, se le pide al service worker que reemplace window.alert en el MAIN
+// world por uno que deja el texto en un atributo del <html>; acá se lee como
+// error de la factura (ver continueAndWatch).
+const ALERT_ATTR = 'data-pa-alert';
+async function patchPageAlert() {
+    try {
+        await chrome.runtime.sendMessage({ type: 'patch-alert', attr: ALERT_ATTR });
+    } catch (e) {
+        console.warn('[ARCA driver] no pude parchear alert()', e);
+    }
+}
+const pendingAlert = () => document.documentElement.getAttribute(ALERT_ATTR) || null;
+
 function clickContinue() {
     const btn = findContinue();
     if (!btn) throw new Error('No se encontró el botón "Continuar"');
+    document.documentElement.removeAttribute(ALERT_ATTR);
     btn.click();
+}
+
+// Continuar y mirar un momento si ARCA rebotó con un alert (validación que no
+// navega). Si lo hizo, la factura falla con ese texto en vez de quedar muda.
+async function continueAndWatch({ wait = 1500 } = {}) {
+    clickContinue();
+    const start = Date.now();
+    while (Date.now() - start < wait) {
+        const msg = pendingAlert();
+        if (msg) throw new Error(`ARCA: ${msg.replace(/\s+/g, ' ').slice(0, 200)}`);
+        await sleep(150);
+    }
 }
 function tryClickContinue() {
     const btn = findContinue();
@@ -251,7 +279,7 @@ async function stepStart(inv, cfg) {
     const universo = document.querySelector('[name=universoComprobante]');
     if (universo && profile.universoComprobante) setValue(universo, profile.universoComprobante);
     await selectComprobanteType(invoiceType(inv, cfg));
-    clickContinue();
+    await continueAndWatch();
 }
 
 async function stepEmisor(cfg) {
@@ -270,7 +298,7 @@ async function stepEmisor(cfg) {
     } else {
         setValue(acti, wanted);
     }
-    clickContinue();
+    await continueAndWatch();
 }
 
 // Espera a que un <select> tenga opciones reales (ARCA las trae por AJAX).
@@ -326,7 +354,7 @@ async function stepReceptor(inv, cfg) {
     // muestra "Condiciones de Venta null" IGUAL, a mano también: es de ARCA.
     const pago = document.querySelector('#formadepago1');
     if (pago && !pago.checked) pago.click();
-    clickContinue();
+    await continueAndWatch();
 }
 
 async function stepReceptorExtra(inv) {
@@ -358,7 +386,7 @@ async function stepOperacion(inv, cfg) {
     // y esto queda en no-op, así konekotekka sigue igual.
     const ivaSel = document.querySelector('#detalle_tipo_iva1, [name=detalleTipoIVA]');
     if (ivaSel) setValue(ivaSel, IVA_21_ID);
-    clickContinue();
+    await continueAndWatch();
 }
 
 async function stepResumen(inv, state) {
@@ -938,6 +966,7 @@ function stepEmpresa(state, inv) {
     const cfg = state.config || {};
     const idx = stepIndex(location.href);
     armVolverGuard();
+    await patchPageAlert();
 
     // Fuimos para atrás sin pasar por el inicio: eso lo hace un humano (Volver
     // o la flecha del navegador), nunca el driver. Pasa a modo manual aunque

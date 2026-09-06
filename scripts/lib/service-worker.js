@@ -16,11 +16,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // el nombre de la orden de ML, así subirlo (a mano o con el driver de ML)
     // es matchear por nombre de archivo.
     if (message.type === "save-pdf") {
-        chrome.downloads.download({
-            url: message.dataUrl,
-            filename: `facturas-arca/${message.orderId}.pdf`,
-            conflictAction: "overwrite",
-        });
+        chrome.downloads.download(
+            {
+                url: message.dataUrl,
+                filename: `facturas-arca/${message.orderId}.pdf`,
+                conflictAction: "overwrite",
+                saveAs: false,
+            },
+            (id) => {
+                // En el batch del 2026-09-05 no quedó NINGÚN archivo en disco y
+                // no había ni un error a la vista: que al menos se loguee.
+                if (chrome.runtime.lastError) console.warn("save-pdf falló", message.orderId, chrome.runtime.lastError.message);
+                else console.log("save-pdf ok", message.orderId, id);
+            },
+        );
         return false;
     }
 
@@ -36,6 +45,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // rellena el AJAX de generar). El content script vive en otro mundo y no
     // la ve: se lee desde acá con executeScript en el MAIN world (necesita
     // host_permissions de fe.afip.gob.ar en el manifest).
+    // Reemplaza window.alert de la página (MAIN world) por uno que no bloquea:
+    // deja el texto en un atributo del <html> y lo loguea. Los alert() de ARCA
+    // congelaban la pestaña entera con el driver adentro.
+    if (message.type === "patch-alert") {
+        const tabId = sender.tab?.id;
+        if (!tabId) {
+            sendResponse(false);
+            return false;
+        }
+        chrome.scripting
+            .executeScript({
+                target: { tabId },
+                world: "MAIN",
+                func: (attr) => {
+                    if (window.__paAlertPatched) return true;
+                    window.__paAlertPatched = true;
+                    window.alert = (m) => {
+                        document.documentElement.setAttribute(attr, String(m ?? ""));
+                        console.warn("[ARCA alert capturado]", m);
+                    };
+                    return true;
+                },
+                args: [message.attr || "data-pa-alert"],
+            })
+            .then(() => sendResponse(true))
+            .catch((e) => {
+                console.warn("patch-alert falló", e);
+                sendResponse(false);
+            });
+        return true;
+    }
+
     if (message.type === "read-page-var") {
         const tabId = sender.tab?.id;
         if (!tabId) {
