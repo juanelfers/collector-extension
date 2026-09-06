@@ -1070,7 +1070,7 @@ async function consultaFill(c) {
     const pv = onlyDigits(c.puntoDeVenta || '');
     if (pv) {
         const sel = document.querySelector('select[name=puntoDeVenta]')
-            || [...document.querySelectorAll('select')].find((s) => [...s.options].some((o) => new RegExp(`^0*${pv}\s*-`).test(o.textContent.trim())));
+            || [...document.querySelectorAll('select')].find((s) => [...s.options].some((o) => new RegExp(`^0*${pv}\\s*-`).test(o.textContent.trim())));
         if (!sel) throw new Error(`No encontré el punto de venta ${pv} en la consulta`);
         setPuntoDeVenta(sel, pv);
     }
