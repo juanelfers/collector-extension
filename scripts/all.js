@@ -600,7 +600,17 @@ async function capturePdf(inv) {
         // `seller`: la cuenta que facturó. La subida a ML filtra por esto para
         // no adjuntar facturas de konekotekka logueado como pokeargentum.
         const st = await getState();
-        invoicePdfs[inv.orderId] = { dataUrl, at: Date.now(), uploaded: false, seller: st?.config?.seller || null };
+        // `mlOrderId`: el id de ORDEN de ML. La clave (`orderId`) es el id del
+        // pack cuando la venta es un pack, y la pantalla de adjuntar factura de
+        // ML sólo acepta el id de la orden (202 de 276 ventas de Poke en agosto
+        // 2026 tenían pack ≠ orden). Lo manda el admin en la cola.
+        invoicePdfs[inv.orderId] = {
+            dataUrl,
+            at: Date.now(),
+            uploaded: false,
+            seller: st?.config?.seller || null,
+            mlOrderId: inv.mlOrderId || null,
+        };
         await chrome.storage.local.set({ invoicePdfs });
         // Copia en disco sólo si el admin lo pide (config.saveToDisk): Chrome
         // abre cada PDF descargado y a Juan le quedaban decenas de pestañas

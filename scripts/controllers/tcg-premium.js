@@ -118,16 +118,29 @@ const TCGPremium = {
     // El admin dispara la subida de facturas a ML: armamos la cola con todos
     // los PDFs pendientes y abrimos la primera orden. De ahí en más el driver
     // (ml-invoices.js) encadena solo, orden por orden.
-    async startMlUpload({ seller } = {}) {
+    // `mlIds`: { [orderId/pack]: idDeOrdenML } — la pantalla de adjuntar de ML
+    // sólo acepta el id de ORDEN, y la clave de los PDF es el id del pack. El
+    // admin lo manda para completar lo que el driver de ARCA no tenía.
+    // `openTab: false` deja la cola armada sin abrir la pestaña (para probar
+    // desde una pestaña propia).
+    async startMlUpload({ seller, mlIds = {}, openTab = true } = {}) {
         const pending = await this.pendingPdfIds(seller);
         if (pending.length) {
+            const { invoicePdfs = {} } = await chrome.storage.local.get('invoicePdfs');
+            for (const id of pending) {
+                if (mlIds[id] && invoicePdfs[id]) invoicePdfs[id] = { ...invoicePdfs[id], mlOrderId: String(mlIds[id]) };
+            }
             await chrome.storage.local.set({
+                invoicePdfs,
                 mlUpload: { active: true, queue: pending, results: [], attempts: {} }
             });
-            chrome.runtime.sendMessage({
-                type: 'open-tab',
-                url: `https://vendedores.mercadolibre.com.ar/emisor/adjuntar-factura?orders_ids=${pending[0]}`
-            });
+            const first = invoicePdfs[pending[0]]?.mlOrderId || pending[0];
+            if (openTab) {
+                chrome.runtime.sendMessage({
+                    type: 'open-tab',
+                    url: `https://vendedores.mercadolibre.com.ar/emisor/adjuntar-factura?orders_ids=${first}`
+                });
+            }
         }
         try {
             window.postMessage({

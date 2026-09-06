@@ -18,7 +18,9 @@
 
 const STORAGE_KEY = 'mlUpload';
 const PAGE_RE = /vendedores\.mercadolibre\.com\.ar\/emisor\/adjuntar-factura/;
-const urlFor = (orderId) => `https://vendedores.mercadolibre.com.ar/emisor/adjuntar-factura?orders_ids=${orderId}`;
+// La pantalla de ML sólo acepta el id de ORDEN. La clave de la cola es el id
+// del pack (el mismo que usa el admin); `entry.mlOrderId` trae el de la orden.
+const urlFor = (orderId, entry) => `https://vendedores.mercadolibre.com.ar/emisor/adjuntar-factura?orders_ids=${entry?.mlOrderId || orderId}`;
 
 const getState = () => chrome.storage.local.get(STORAGE_KEY).then((r) => r[STORAGE_KEY] || null);
 const setState = (state) => chrome.storage.local.set({ [STORAGE_KEY]: state });
@@ -142,7 +144,7 @@ async function shiftAndGoNext(orderId, status, detail) {
     fresh.queue = (fresh.queue || []).slice(1);
     await setState(fresh);
     if (fresh.queue.length) {
-        location.href = urlFor(fresh.queue[0]);
+        location.href = urlFor(fresh.queue[0], await getPdf(fresh.queue[0]));
     } else {
         renderDonePanel(fresh);
     }
@@ -179,7 +181,7 @@ function renderPanel(state, orderId, note) {
     const { done, total } = progressOf(state);
     el.innerHTML = `
         <div style="font-weight:700;color:#F5CE4B;margin-bottom:6px">Subiendo a ML ${done + 1}/${total}</div>
-        <div style="opacity:.85">Orden <b>${orderId}</b></div>
+        <div style="opacity:.85">Venta <b>${orderId}</b></div>
         ${note ? `<div style="margin-top:4px;opacity:.85">${note}</div>` : ''}
         <div style="margin-top:10px;display:flex;gap:8px">
             <button id="pa-ml-pause" style="${btnStyle('#333')}">Pausar</button>
@@ -228,7 +230,7 @@ function renderPausedPanel(state) {
         const s = (await getState()) || state;
         s.active = true;
         await setState(s);
-        if (s.queue?.length) location.href = urlFor(s.queue[0]);
+        if (s.queue?.length) location.href = urlFor(s.queue[0], await getPdf(s.queue[0]));
     };
     el.querySelector('#pa-ml-cancel').onclick = cancelAll;
 }
@@ -280,16 +282,17 @@ async function cancelAll() {
         return shiftAndGoNext(orderId, 'error', 'Demasiados intentos en la página de ML');
     }
 
-    // ¿Estamos parados en la orden correcta?
+    const entry = await getPdf(orderId);
+
+    // ¿Estamos parados en la orden correcta? (id de orden de ML, no el del pack)
     const urlOrder = new URLSearchParams(location.search).get('orders_ids');
-    if (urlOrder !== orderId) {
-        location.href = urlFor(orderId);
+    const wanted = entry?.mlOrderId || orderId;
+    if (urlOrder !== wanted) {
+        location.href = urlFor(orderId, entry);
         return;
     }
 
     renderPanel(state, orderId, 'Buscando el formulario…');
-
-    const entry = await getPdf(orderId);
     if (!entry?.dataUrl) {
         return renderManualPanel(state, orderId, entry?.uploaded
             ? 'Esta ya figura como subida.'
