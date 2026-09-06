@@ -300,7 +300,8 @@ async function stepOperacion(inv, cfg) {
 }
 
 async function stepResumen(inv, state) {
-    const genBtn = document.querySelector('#btngenerar');
+    const genEl = document.querySelector('#btngenerar');
+    const genBtn = genEl && genEl.offsetParent !== null ? genEl : null; // oculto = ya generó
 
     // En modo "confirmar", frenamos antes de generar y esperamos al usuario.
     if (state.mode === 'confirm' && genBtn) {
@@ -340,7 +341,10 @@ async function generateAndFinish(state, inv) {
 // Estado "comprobante generado" en la MISMA página del resumen: el botón de
 // generar desaparece y aparecen "Imprimir..." / "Comprobante Generado".
 function isGenerated() {
-    if (document.querySelector('#btngenerar')) return false;
+    // Después de generar, ARCA no borra #btngenerar: lo ESCONDE (visto en vivo
+    // 2026-09-05, offsetParent null). Sólo cuenta si está visible.
+    const gen = document.querySelector('#btngenerar');
+    if (gen && gen.offsetParent !== null) return false;
     if (/comprobante\s+generado/i.test(document.body?.innerText || '')) return true;
     return [...document.querySelectorAll('input[type=button]')].some((b) => /imprimir/i.test(b.value || ''));
 }
