@@ -246,24 +246,55 @@ async function stepEmisor(cfg) {
     clickContinue();
 }
 
+// Espera a que un <select> tenga opciones reales (ARCA las trae por AJAX).
+async function waitForOptions(sel, { timeout = 6000 } = {}) {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+        if (sel?.options && [...sel.options].some((o) => o.value)) return true;
+        await sleep(150);
+    }
+    return false;
+}
+
 async function stepReceptor(inv, cfg) {
     const profile = profileFor(inv, cfg);
     const iva = await waitFor('#idivareceptor');
+    // ARCA inicializa el formulario con su propio JS después de pintarlo: si
+    // se llena demasiado pronto, lo pisa y Continuar tira el alert "campos
+    // obligatorios" (visto en vivo 2026-09-05 en la factura 20 de un batch;
+    // las 19 anteriores pasaron por timing). Un respiro y verificación.
+    await sleep(700);
     // Sin condición fija en el perfil (C), usamos la que manda el admin —
     // ML nos dice el taxpayer_type del comprador. Si tampoco viene: DNI es
     // consumidor final, y con CUIT no tocamos nada (la trae ARCA del padrón).
     const cond = profile.idivareceptor
         ?? inv.condicionIva
         ?? (docTypeFor(inv) === '96' ? CONSUMIDOR_FINAL_ID : null);
-    if (cond) setValue(iva, cond);
-    setValue(document.querySelector('#idtipodocreceptor'), docTypeFor(inv));
+    const tipoDoc = document.querySelector('#idtipodocreceptor');
+    const nroDoc = document.querySelector('#nrodocreceptor');
+    const docType = docTypeFor(inv);
+    const nro = onlyDigits(inv.clientId);
+
+    for (let intento = 0; intento < 3; intento++) {
+        if (cond) setValue(iva, cond);
+        // El desplegable de tipo de documento se puebla por AJAX DESPUÉS de
+        // elegir la condición de IVA: hay que esperarlo o queda vacío.
+        await waitForOptions(tipoDoc);
+        setValue(tipoDoc, docType);
+        setValue(nroDoc, nro);
+        await sleep(900); // AFIP valida el doc por AJAX (y, en A, trae la razón social)
+        const ok = (!cond || iva.value === cond) && tipoDoc.value === docType && onlyDigits(nroDoc.value) === nro;
+        if (ok) break;
+        console.warn('[ARCA driver] receptor no quedó cargado, reintento', intento + 1, {
+            iva: iva.value, tipoDoc: tipoDoc.value, nro: nroDoc.value,
+        });
+        await sleep(500);
+    }
     // Contado. Click de verdad, no `checked = true`: es lo que ARCA valida
     // (registrarSiNingunaCondicionDeVenta) y lo que imprime el PDF. El resumen
     // muestra "Condiciones de Venta null" IGUAL, a mano también: es de ARCA.
     const pago = document.querySelector('#formadepago1');
     if (pago && !pago.checked) pago.click();
-    setValue(document.querySelector('#nrodocreceptor'), onlyDigits(inv.clientId));
-    await sleep(800); // AFIP valida el doc por AJAX (y, en A, trae la razón social)
     clickContinue();
 }
 
@@ -413,7 +444,18 @@ function waitForDialogConfirm({ timeout = 6000 } = {}) {
 // script corre en otro mundo y no la ve: se le pide a la página que la copie a
 // un atributo del <html> con un <script> inline (ARCA no manda CSP que lo
 // frene). Plan B: que haya quedado escrita en el HTML.
-function readIdComprobante() {
+async function readIdComprobante() {
+    // 1) El service worker lo lee en el MAIN world (executeScript): es lo
+    //    único que anduvo en vivo — el <script> inline de abajo no vio la
+    //    global en las primeras 18 facturas del 2026-09-05.
+    try {
+        const v = await chrome.runtime.sendMessage({ type: 'read-page-var', name: 'idComprobante' });
+        if (/^\d+$/.test(String(v || ''))) return String(v);
+        console.warn('[ARCA driver] read-page-var devolvió', v);
+    } catch (e) {
+        console.warn('[ARCA driver] read-page-var falló', e);
+    }
+    // 2) <script> inline que copia la global a un atributo del <html>.
     try {
         const attr = 'data-pa-idcomprobante';
         document.documentElement.removeAttribute(attr);
@@ -432,8 +474,11 @@ function readIdComprobante() {
 
 async function capturePdf(inv) {
     try {
-        const id = readIdComprobante();
-        if (!id) return false;
+        const id = await readIdComprobante();
+        if (!id) {
+            console.warn('[ARCA driver] sin idComprobante: no capturo el PDF de', inv.orderId);
+            return false;
+        }
         const url = new URL(`imprimirComprobante.do?c=${id}`, location.href).href;
         // Timeout: ARCA a veces deja el request colgado para siempre y el batch
         // muere acá. Abortar corta también la lectura del body; cae al catch,

@@ -32,6 +32,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
     }
 
+    // El driver de ARCA necesita una GLOBAL de la página (idComprobante, que
+    // rellena el AJAX de generar). El content script vive en otro mundo y no
+    // la ve: se lee desde acá con executeScript en el MAIN world (necesita
+    // host_permissions de fe.afip.gob.ar en el manifest).
+    if (message.type === "read-page-var") {
+        const tabId = sender.tab?.id;
+        if (!tabId) {
+            sendResponse(null);
+            return false;
+        }
+        chrome.scripting
+            .executeScript({
+                target: { tabId },
+                world: "MAIN",
+                func: (name) => {
+                    try {
+                        const v = globalThis[name];
+                        return v == null ? "" : String(v);
+                    } catch {
+                        return "";
+                    }
+                },
+                args: [message.name],
+            })
+            .then((res) => sendResponse(res?.[0]?.result ?? null))
+            .catch((e) => {
+                console.warn("read-page-var falló", e);
+                sendResponse(null);
+            });
+        return true; // sendResponse asíncrono
+    }
+
     // El bridge pide abrir una pestaña (p.ej. la primera orden de ML a subir).
     if (message.type === "open-tab") {
         chrome.tabs.create({ url: message.url });

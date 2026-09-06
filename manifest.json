@@ -8,7 +8,7 @@
     "default_icon": "src/img/lapras.webp"
   },
   "permissions": ["storage", "unlimitedStorage", "tabs", "activeTab", "scripting", "webRequest", "downloads"],
-  "host_permissions": ["https://www.pokellector.com/*"],
+  "host_permissions": ["https://www.pokellector.com/*", "https://fe.afip.gob.ar/*"],
   "background": {
     "service_worker": "scripts/lib/service-worker.js"
   },
