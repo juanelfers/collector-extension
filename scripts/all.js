@@ -86,15 +86,23 @@ const onlyDigits = (s) => String(s || '').replace(/\D/g, '');
 // que ARCA lo busque en el padrón, no lo encuentre como empresa y pida razón
 // social y domicilio (alert "campos obligatorios"). Para una Factura C a
 // consumidor final alcanza el DNI, que son los 8 dígitos del medio del CUIL.
+// Con 11 dígitos manda la CONDICIÓN DE IVA del comprador, no el prefijo: un RI,
+// monotributista o exento (ML lo dice) va con CUIT entero — ARCA sólo le
+// ofrece CUIT (factura 67 del batch: RI con 20-29375418-8 → "Tipo de Documento
+// inválido" al mandarle DNI). Sólo el consumidor final (o sin dato) va con el
+// DNI de adentro del CUIL.
+const IVA_CON_CUIT = new Set(['1', '4', '6', '13', '16']);
 function receptorDoc(inv) {
     const digits = onlyDigits(inv.clientId);
     const declared = String(inv.docType || '').toUpperCase();
+    const cond = String(inv.condicionIva || '');
     if (digits.length === 11) {
+        if (IVA_CON_CUIT.has(cond) || declared === 'CUIT') return { type: '80', number: digits };
         const personaFisica = /^(20|23|24|27)/.test(digits);
-        if (declared === 'CUIL' || (declared !== 'CUIT' && personaFisica)) {
+        if (declared === 'CUIL' || personaFisica) {
             return { type: '96', number: digits.slice(2, 10) }; // DNI adentro del CUIL
         }
-        return { type: '80', number: digits }; // CUIT
+        return { type: '80', number: digits }; // CUIT de empresa
     }
     return { type: '96', number: digits };
 }
@@ -307,6 +315,11 @@ async function stepReceptor(inv, cfg) {
             iva: iva.value, tipoDoc: tipoDoc.value, nro: nroDoc.value,
         });
         await sleep(500);
+        if (intento === 2) {
+            // Apretar Continuar así dispara el alert de ARCA, que congela la
+            // pestaña. Mejor frenar y que una persona mire (o salte).
+            throw new Error(`Receptor no aceptado por ARCA (IVA ${iva.value || '—'}, tipo doc ${tipoDoc.value || '—'}, nro ${nroDoc.value || '—'})`);
+        }
     }
     // Contado. Click de verdad, no `checked = true`: es lo que ARCA valida
     // (registrarSiNingunaCondicionDeVenta) y lo que imprime el PDF. El resumen
