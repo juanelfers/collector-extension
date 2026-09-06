@@ -79,14 +79,33 @@ const setState = (state) => chrome.storage.local.set({ [STORAGE_KEY]: state });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const onlyDigits = (s) => String(s || '').replace(/\D/g, '');
-const docTypeFor = (inv) => (onlyDigits(inv.clientId).length >= 11 ? '80' /* CUIT */ : '96' /* DNI */);
+// Tipo y número de documento del receptor. El admin manda `docType` (lo que
+// dice ML: DNI/CUIT/CUIL); si no viene, se deduce por el largo.
+// TRAMPA vista en vivo 2026-09-05 (factura 20 del batch): compradores que
+// cargan su CUIL de 11 dígitos en el campo DNI de ML. Mandarlo como CUIT hace
+// que ARCA lo busque en el padrón, no lo encuentre como empresa y pida razón
+// social y domicilio (alert "campos obligatorios"). Para una Factura C a
+// consumidor final alcanza el DNI, que son los 8 dígitos del medio del CUIL.
+function receptorDoc(inv) {
+    const digits = onlyDigits(inv.clientId);
+    const declared = String(inv.docType || '').toUpperCase();
+    if (digits.length === 11) {
+        const personaFisica = /^(20|23|24|27)/.test(digits);
+        if (declared === 'CUIL' || (declared !== 'CUIT' && personaFisica)) {
+            return { type: '96', number: digits.slice(2, 10) }; // DNI adentro del CUIL
+        }
+        return { type: '80', number: digits }; // CUIT
+    }
+    return { type: '96', number: digits };
+}
+const docTypeFor = (inv) => receptorDoc(inv).type;
 
 // El tipo sale de la config de la cuenta emisora. 'auto' (o vacío) = A/B por
 // documento del cliente, que es lo de siempre para un responsable inscripto.
 function invoiceType(inv, cfg = {}) {
     const forced = inv.tipoComprobante || cfg.tipoComprobante;
     if (forced && forced !== 'auto' && TYPE_PROFILES[forced]) return forced;
-    return onlyDigits(inv.clientId).length >= 11 ? 'A' : 'B';
+    return receptorDoc(inv).type === '80' ? 'A' : 'B';
 }
 const profileFor = (inv, cfg) => TYPE_PROFILES[invoiceType(inv, cfg)];
 
@@ -272,8 +291,7 @@ async function stepReceptor(inv, cfg) {
         ?? (docTypeFor(inv) === '96' ? CONSUMIDOR_FINAL_ID : null);
     const tipoDoc = document.querySelector('#idtipodocreceptor');
     const nroDoc = document.querySelector('#nrodocreceptor');
-    const docType = docTypeFor(inv);
-    const nro = onlyDigits(inv.clientId);
+    const { type: docType, number: nro } = receptorDoc(inv);
 
     for (let intento = 0; intento < 3; intento++) {
         if (cond) setValue(iva, cond);
@@ -299,8 +317,8 @@ async function stepReceptor(inv, cfg) {
 }
 
 async function stepReceptorExtra(inv) {
-    setValue(document.querySelector('#idtipodocreceptor'), docTypeFor(inv));
-    setValue(document.querySelector('#nrodocreceptor'), onlyDigits(inv.clientId));
+    setValue(document.querySelector('#idtipodocreceptor'), receptorDoc(inv).type);
+    setValue(document.querySelector('#nrodocreceptor'), receptorDoc(inv).number);
     const dom = document.querySelector('#domicilioreceptor');
     if (dom && inv.address) dom.value = inv.address;
     await sleep(400);
