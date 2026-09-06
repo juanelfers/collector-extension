@@ -279,8 +279,14 @@ async function stepStart(inv, cfg) {
     const pv = await waitFor('[name=puntoDeVenta]');
     setPuntoDeVenta(pv, cfg.puntoDeVenta || '1');
     const profile = profileFor(inv, cfg);
+    // En las cuentas vistas hasta ahora (monotributo Y responsable inscripto,
+    // verificado 2026-09-05) `universoComprobante` ES el desplegable de tipo de
+    // comprobante, con los ids reales de ARCA (RI: 26=Factura A, 19=Factura B).
+    // Sólo se toca si tiene una opción con el valor del perfil; si no, ponerle
+    // un valor inexistente lo deja en blanco y dispara un change al vacío.
     const universo = document.querySelector('[name=universoComprobante]');
-    if (universo && profile.universoComprobante) setValue(universo, profile.universoComprobante);
+    const uv = profile.universoComprobante;
+    if (universo && uv && [...universo.options].some((o) => o.value === uv)) setValue(universo, uv);
     await selectComprobanteType(invoiceType(inv, cfg));
     await continueAndWatch();
 }
@@ -369,6 +375,18 @@ async function stepReceptorExtra(inv) {
     tryClickContinue();
 }
 
+// Neto de una Factura A tal que neto + IVA(21%) redondeado dé EXACTAMENTE el
+// total cobrado. Redondear total/1.21 a secas falla de a un centavo cada tanto
+// (24.499,99 → neto 20.247,93 → 20.247,93 + 4.252,07 = 24.500,00): se prueban
+// los vecinos y se queda el que cierra; si ninguno, el más cercano.
+function netoFor(total) {
+    const c = (n) => Math.round(n * 100) / 100;
+    const base = c(total / 1.21);
+    const cands = [base, c(base - 0.01), c(base + 0.01)];
+    const exact = cands.find((n) => Math.round((n + c(n * 0.21)) * 100) === Math.round(total * 100));
+    return (exact ?? base).toFixed(2);
+}
+
 async function stepOperacion(inv, cfg) {
     const desc = await waitFor('#detalle_descripcion1');
     setValue(desc, cfg.descripcion || 'Artículos TCG');
@@ -379,7 +397,7 @@ async function stepOperacion(inv, cfg) {
     const precio = document.querySelector('#detalle_precio1');
     if (profileFor(inv, cfg).discriminaIva) {
         // Factura A: se carga el NETO; AFIP agrega el IVA encima.
-        setValue(precio, (total / 1.21).toFixed(2));
+        setValue(precio, netoFor(total));
     } else {
         // Factura B y C: precio bruto (IVA incluido).
         setValue(precio, total.toFixed(2));
