@@ -113,7 +113,10 @@ const docTypeFor = (inv) => receptorDoc(inv).type;
 function invoiceType(inv, cfg = {}) {
     const forced = inv.tipoComprobante || cfg.tipoComprobante;
     if (forced && forced !== 'auto' && TYPE_PROFILES[forced]) return forced;
-    return receptorDoc(inv).type === '80' ? 'A' : 'B';
+    // Regla de la contadora de Poke (doc "PROCESO DE FACTURACION", 2026-09):
+    // A sólo si el comprador es Responsable Inscripto; monotributista y
+    // consumidor final van con B. Un monotributista trae CUIT y antes caía en A.
+    return String(inv.condicionIva || '') === '1' ? 'A' : 'B';
 }
 const profileFor = (inv, cfg) => TYPE_PROFILES[invoiceType(inv, cfg)];
 
@@ -577,7 +580,10 @@ async function capturePdf(inv) {
         const st = await getState();
         invoicePdfs[inv.orderId] = { dataUrl, at: Date.now(), uploaded: false, seller: st?.config?.seller || null };
         await chrome.storage.local.set({ invoicePdfs });
-        chrome.runtime.sendMessage({ type: 'save-pdf', orderId: inv.orderId, dataUrl });
+        // Copia en disco sólo si el admin lo pide (config.saveToDisk): Chrome
+        // abre cada PDF descargado y a Juan le quedaban decenas de pestañas
+        // comiendo RAM. Para subir a ML alcanza con el storage.
+        if (st?.config?.saveToDisk) chrome.runtime.sendMessage({ type: 'save-pdf', orderId: inv.orderId, dataUrl });
         console.log('[PokeArgentum] PDF capturado', inv.orderId, `${Math.round(bytes.length / 1024)}KB`);
         return true;
     } catch (e) {
