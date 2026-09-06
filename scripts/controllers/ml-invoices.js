@@ -18,6 +18,13 @@
 
 const STORAGE_KEY = 'mlUpload';
 const PAGE_RE = /vendedores\.mercadolibre\.com\.ar\/emisor\/adjuntar-factura/;
+// Verificado 2026-09-06: al aceptar el PDF, ML navega la pestaña ENTERA al
+// detalle de la venta (/ventas/{idOrden}/detalle). El content script de la
+// pantalla de adjuntar muere ahí sin anotar nada, así que el desenlace se lee
+// en la página de detalle: "Factura de la venta · Factura electrónica
+// {venta}.pdf". Antes de confirmar se deja `inFlight` en el storage.
+const DETAIL_RE = /mercadolibre\.com\.ar\/ventas\/(\d+)\/detalle/;
+const INVOICED_RE = /factura\s+de\s+la\s+venta|factura\s+electr[óo]nica\s+\d+\.pdf/i;
 // La pantalla de ML sólo acepta el id de ORDEN. La clave de la cola es el id
 // del pack (el mismo que usa el admin); `entry.mlOrderId` trae el de la orden.
 const urlFor = (orderId, entry) => `https://vendedores.mercadolibre.com.ar/emisor/adjuntar-factura?orders_ids=${entry?.mlOrderId || orderId}`;
@@ -142,6 +149,7 @@ async function shiftAndGoNext(orderId, status, detail) {
     const fresh = (await getState()) || {};
     fresh.results = [...(fresh.results || []), { orderId, status, detail: detail || null, at: Date.now() }];
     fresh.queue = (fresh.queue || []).slice(1);
+    fresh.inFlight = null;
     await setState(fresh);
     if (fresh.queue.length) {
         location.href = urlFor(fresh.queue[0], await getPdf(fresh.queue[0]));
@@ -256,12 +264,41 @@ async function cancelAll() {
     document.getElementById('pa-ml-panel')?.remove();
 }
 
+// Página de detalle de una venta: es donde ML deja la pestaña después de
+// aceptar el PDF. Si hay una subida en vuelo (o la orden en curso ya figura
+// con factura, p.ej. porque ML redirige acá una orden ya facturada), se marca
+// y se sigue con la siguiente.
+async function onDetailPage(state) {
+    const urlOrder = (location.href.match(DETAIL_RE) || [])[1];
+    const current = state.queue?.[0] ? String(state.queue[0]) : null;
+    const entry = current ? await getPdf(current) : null;
+    const currentMl = entry?.mlOrderId || current;
+    const inFlight = state.inFlight?.orderId ? String(state.inFlight.orderId) : null;
+    // Sólo actuamos si esta página es la de la orden en curso.
+    if (!current || urlOrder !== currentMl) return;
+    if (!inFlight && (state.attempts?.[current] || 0) === 0) return;
+
+    renderPanel(state, current, 'Verificando en el detalle de la venta…');
+    const ok = await waitFor(() => INVOICED_RE.test(document.body?.innerText || ''), { timeout: 15000 });
+    if (ok) {
+        await markUploaded(current);
+        await shiftAndGoNext(current, 'ok', inFlight ? 'ML mostró la factura en el detalle' : 'Ya figuraba con factura en ML');
+        return;
+    }
+    renderManualPanel(state, current, 'Confirmé la subida pero el detalle de la venta no muestra la factura. Fijate si quedó cargada.');
+}
+
 // ------------------------------------------------------------------ main -----
 (async function main() {
-    if (!PAGE_RE.test(location.href)) return;
+    const onDetail = DETAIL_RE.test(location.href);
+    if (!PAGE_RE.test(location.href) && !onDetail) return;
 
     const state = await getState();
     if (!state) return;
+    if (onDetail) {
+        if (state.active && state.queue?.length) await onDetailPage(state);
+        return;
+    }
 
     if (!state.queue || !state.queue.length) {
         if (state.results?.length) renderDonePanel(state);
@@ -315,6 +352,13 @@ async function cancelAll() {
     const submit = await waitFor(findSubmit, { timeout: 8000 });
     if (!submit) {
         return renderManualPanel(state, orderId, 'Adjunté el PDF pero no encontré el botón de confirmar: revisá y confirmá a mano.');
+    }
+    // Antes de confirmar: si ML navega al detalle, el script de esa página
+    // termina el trabajo (marca la factura y sigue con la siguiente).
+    {
+        const s = (await getState()) || state;
+        s.inFlight = { orderId, at: Date.now() };
+        await setState(s);
     }
     submit.click();
     renderPanel(state, orderId, 'Confirmado, esperando a ML…');

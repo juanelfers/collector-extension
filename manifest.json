@@ -34,7 +34,7 @@
       "run_at": "document_start"
     },
     {
-      "matches": ["https://vendedores.mercadolibre.com.ar/emisor/*", "https://www.mercadolibre.com.ar/emisor/*"],
+      "matches": ["https://vendedores.mercadolibre.com.ar/emisor/*", "https://www.mercadolibre.com.ar/emisor/*", "https://vendedores.mercadolibre.com.ar/ventas/*/detalle*", "https://www.mercadolibre.com.ar/ventas/*/detalle*"],
       "js": ["scripts/controllers/ml-invoices.js"],
       "run_at": "document_idle"
     },
