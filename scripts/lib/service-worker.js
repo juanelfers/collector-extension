@@ -105,6 +105,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true; // sendResponse asíncrono
     }
 
+    // BringIt · "Mis compras": ¿el despacho de Correo Argentino llegó? Lo
+    // pregunta el SW porque la página de BringIt no puede leer una respuesta
+    // de correoargentino.com.ar (CORS); acá alcanza con el host_permissions.
+    if (message.type === "correo-tracking") {
+        fetchCorreoTracking(message.tracking).then(sendResponse);
+        return true; // sendResponse asíncrono
+    }
+
     // El bridge pide abrir una pestaña (p.ej. la primera orden de ML a subir).
     if (message.type === "open-tab") {
         chrome.tabs.create({ url: message.url });
@@ -143,3 +151,92 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     }
     suggest();
 });
+
+// ─── Seguimiento de Correo Argentino ─────────────────────────────────────
+//
+// Mismo cliente que usa la web de PokeArgentum para avisar entregas
+// (pokeargentum-fulldeck: app/api/lib/tracking/correoArgentino.js). El
+// formulario público https://www.correoargentino.com.ar/formularios/e-commerce
+// hace por detrás un POST a wsFacade.php sin reCAPTCHA ni login, y devuelve el
+// historial como un fragmento HTML: una tabla Fecha | Planta | Historia |
+// Estado cuya PRIMERA fila es el último movimiento. Es un endpoint no oficial
+// (y detrás de un WAF): nunca tira, devuelve { ok: false, error }.
+
+const CORREO_ENDPOINT = "https://www.correoargentino.com.ar/sites/all/modules/custom/ca_forms/api/wsFacade.php";
+
+async function fetchCorreoTracking(trackingNumber) {
+    const id = String(trackingNumber || "").trim();
+    if (!id) return { ok: false, error: "sin tracking" };
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+        const res = await fetch(CORREO_ENDPOINT, {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+                "X-Requested-With": "XMLHttpRequest",
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            },
+            body: new URLSearchParams({ action: "ecommerce", id, producto: "", pais: "" }).toString(),
+        });
+        if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+
+        const html = await res.text();
+        // Pieza inexistente, respuesta vacía o challenge del WAF.
+        if (!html.includes("data-title")) return { ok: false, error: "sin resultados" };
+
+        const rows = parseCorreoRows(html);
+        if (!rows.length) return { ok: false, error: "sin filas" };
+
+        const piece = (html.match(/pieza:\s*<span[^>]*>([^<]+)<\/span>/i)?.[1] || "").trim();
+        return { ok: true, piece, planta: rows[0].planta, fecha: rows[0].fecha, ...classifyCorreo(rows) };
+    } catch (err) {
+        return { ok: false, error: err?.name === "AbortError" ? "timeout" : String(err?.message || err) };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// El markup es inválido (los <tr> no cierran): se parsea por celdas, de a 4
+// <td data-title="..."> consecutivos por fila.
+function parseCorreoRows(html) {
+    const decode = (s) =>
+        s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").replace(/&aacute;/g, "á");
+    const cells = [...html.matchAll(/<td[^>]*data-title="([^"]*)"[^>]*>([^<]*)<\/td>/g)]
+        .map((m) => ({ title: m[1].replace(/:$/, "").toLowerCase(), value: decode(m[2].trim()) }));
+
+    const rows = [];
+    for (let i = 0; i + 3 < cells.length; i += 4) {
+        const row = {};
+        for (const c of cells.slice(i, i + 4)) row[c.title] = c.value;
+        rows.push({ fecha: row.fecha || "", planta: row.planta || "", historia: row.historia || "", estado: row.estado || "" });
+    }
+    return rows;
+}
+
+//   delivered  → en manos del cliente (a domicilio o retirado en sucursal)
+//   at_branch  → esperando retiro en sucursal (hay que ir a buscarlo)
+//   failed     → devolución / no entregado
+//   in_transit → en movimiento
+//   pending    → sólo preimposición
+function classifyCorreo(rows) {
+    const top = rows[0];
+    const hist = (top.historia || "").toUpperCase();
+    const est = (top.estado || "").toUpperCase();
+    const text = (top.estado || top.historia || "").trim();
+
+    let status;
+    if (est.includes("ENTREGADO") || hist.includes("ENTREGADO") || est.includes("ENTREGA EN SUCURSAL")) status = "delivered";
+    // "INTENTO DE ENTREGA" + "EN ESPERA EN SUCURSAL": no lo encontraron, quedó para retirar.
+    else if (text.toUpperCase().includes("SUCURSAL")) status = "at_branch";
+    else if (hist.includes("INTENTO DE ENTREGA") || hist.includes("DEVOL") || hist.includes("NO ENTREG")) status = "failed";
+    else if (hist.includes("PREIMPOSICION") || hist.includes("PREIMPOSICIÓN")) status = "pending";
+    else status = "in_transit";
+
+    // "31-08-2026 16:52" → "2026-08-31 16:52"
+    const m = (top.fecha || "").match(/(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})/);
+    const deliveredAt = status === "delivered" && m ? `${m[3]}-${m[2]}-${m[1]} ${m[4]}:${m[5]}` : null;
+
+    return { status, rawStatus: (text || hist).slice(0, 120), deliveredAt };
+}

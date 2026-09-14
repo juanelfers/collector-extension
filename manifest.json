@@ -8,7 +8,7 @@
     "default_icon": "src/img/lapras.webp"
   },
   "permissions": ["storage", "unlimitedStorage", "tabs", "activeTab", "scripting", "webRequest", "downloads"],
-  "host_permissions": ["https://www.pokellector.com/*", "https://fe.afip.gob.ar/*"],
+  "host_permissions": ["https://www.pokellector.com/*", "https://fe.afip.gob.ar/*", "https://www.correoargentino.com.ar/*"],
   "background": {
     "service_worker": "scripts/lib/service-worker.js"
   },
@@ -16,6 +16,17 @@
     {
       "matches": ["https://articulo.mercadolibre.com.ar/*", "https://www.mercadolibre.com.ar/*"],
       "js": ["scripts/controllers/ml-admin-link.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://app.bringitimport.com/*"],
+      "js": ["scripts/controllers/bringit-page.js"],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://app.bringitimport.com/*"],
+      "js": ["scripts/controllers/bringit.js"],
       "run_at": "document_idle"
     },
     {
