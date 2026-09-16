@@ -65,7 +65,7 @@
       "run_at": "document_start"
     },
     {
-      "matches": ["https://pymes.andreani.com/hacer-envio/*"],
+      "matches": ["https://pymes.andreani.com/*"],
       "js": ["scripts/andreani.js"],
       "run_at": "document_start"
     },
