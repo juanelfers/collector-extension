@@ -238,8 +238,12 @@ const TCGPremium = {
     // "pausar" frena después de la factura en curso; "reanudar" además le
     // pide al service worker que lleve la pestaña de ARCA al inicio del
     // comprobante (si no hay pestaña de ARCA, la abre por el SSO).
-    async control({ target, action }) {
-        const key = target === 'mlUpload' ? 'mlUpload' : 'invoicing';
+    // Qué controlar viaja como `which`: con `target` pisaba el target del
+    // mensaje ('pokeargentum-extension') y el listener lo descartaba en
+    // silencio — Cancelar/Pausar nunca llegaban (visto con un batch vivo el
+    // 2026-10-05).
+    async control({ which, action }) {
+        const key = which === 'mlUpload' ? 'mlUpload' : 'invoicing';
         const st = (await chrome.storage.local.get(key))[key];
         let result = 'ok';
         if (action === 'cancel') {
