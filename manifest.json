@@ -30,6 +30,11 @@
       "run_at": "document_idle"
     },
     {
+      "matches": ["https://www.correoargentino.com.ar/formularios/e-commerce*"],
+      "js": ["scripts/controllers/correo-seguimiento.js"],
+      "run_at": "document_idle"
+    },
+    {
       "matches": ["https://fe.afip.gob.ar/*"],
       "js": ["scripts/all.js"],
       "run_at": "document_idle"

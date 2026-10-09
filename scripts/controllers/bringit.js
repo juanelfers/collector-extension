@@ -136,6 +136,21 @@ function getDespacho(id) {
 // Andreani son 15 dígitos o directamente una URL: no matchean.
 const isCorreoArgentino = (despacho) => /^(?:\d{9}[A-Z0-9]{14}|[A-Z]{2}\d{9}[A-Z]{2})$/i.test(despacho?.tracking || '');
 
+/**
+ * La página de seguimiento del transporte, con el número ya cargado: el
+ * formulario de e-commerce de Correo acepta `?id=` (lo usan los mails de
+ * PokeArgentum) y lee los dos formatos; Andreani son 15 dígitos o la URL entera.
+ */
+function seguimientoDe(despacho) {
+    const tracking = despacho?.tracking || '';
+    if (isCorreoArgentino(despacho)) {
+        return { href: `https://www.correoargentino.com.ar/formularios/e-commerce?id=${encodeURIComponent(tracking)}`, label: 'Correo ↗' };
+    }
+    if (/^\d{15}$/.test(tracking)) return { href: `https://www.andreani.com/envio/${tracking}`, label: 'Andreani ↗' };
+    if (/^https?:\/\//.test(tracking)) return { href: tracking, label: 'seguir ↗' };
+    return null;
+}
+
 let correoQueue = Promise.resolve();
 
 /** Estado de Correo para un tracking. Entregado no vence; lo demás se re-pregunta pasado el TTL. */
@@ -194,7 +209,13 @@ const MARCAR = 'Click para marcarlo como recibido.';
  * Qué mostrar para una fila. Precedencia: BringIt ya lo tiene como recibido →
  * lo marcaste a mano → lo que diga Correo → sin datos.
  */
-function llegadaDe({ status, recibido, despachoId, despacho, correo }) {
+function llegadaDe(args) {
+    const llegada = llegadaSinLink(args);
+    const link = args.despacho && !args.despacho.error ? seguimientoDe(args.despacho) : null;
+    return link ? { ...llegada, link } : llegada;
+}
+
+function llegadaSinLink({ status, recibido, despachoId, despacho, correo }) {
     if (status === RECIBIDO_BRINGIT) {
         return { kind: 'recibido', label: '✓ Recibido', title: 'Confirmado como recibido en BringIt' };
     }
@@ -233,7 +254,6 @@ function llegadaDe({ status, recibido, despachoId, despacho, correo }) {
             kind: 'desconocido',
             label: 'Sin seguimiento',
             title: `${via}\nNo se puede consultar solo. ${MARCAR}`,
-            link: /^https?:\/\//.test(despacho.tracking) ? despacho.tracking : null,
             canMark: true,
         };
     }
@@ -294,7 +314,7 @@ function badgeFor(tr, estadoIndex) {
 }
 
 function paint(badge, tr, llegada) {
-    const key = [tr.dataset.paCc, llegada.kind, llegada.label, llegada.title, llegada.link].join('|');
+    const key = [tr.dataset.paCc, llegada.kind, llegada.label, llegada.title, llegada.link?.href].join('|');
     if (badge.dataset.key === key) return;
 
     Object.assign(badge.dataset, {
@@ -325,14 +345,16 @@ function paint(badge, tr, llegada) {
     });
     badge.append(chip);
 
-    // Andreani trae el link de seguimiento en vez del número.
+    // El seguimiento en la página del transporte, con el número ya cargado.
     if (llegada.link) {
         const a = document.createElement('a');
-        a.href = llegada.link;
+        a.href = llegada.link.href;
         a.target = '_blank';
         a.rel = 'noopener';
-        a.textContent = 'seguir ↗';
-        Object.assign(a.style, { marginLeft: '6px', fontSize: '12px' });
+        a.textContent = llegada.link.label;
+        a.title = 'Abrir el seguimiento';
+        a.addEventListener('click', (e) => e.stopPropagation());
+        Object.assign(a.style, { marginLeft: '6px', fontSize: '12px', whiteSpace: 'nowrap' });
         badge.append(a);
     }
 }
