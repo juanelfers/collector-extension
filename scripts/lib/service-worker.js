@@ -1,3 +1,5 @@
+try { importScripts('shop-core.js', 'shop-data.js'); } catch (e) { console.error('[shop-marks] no cargó', e); }
+
 // Último orderId que está por disparar una descarga desde ARCA (fallback del
 // botón Imprimir). Variable de módulo: el SW puede dormirse y perderla, pero
 // el click → descarga tarda milisegundos, así que en la práctica alcanza.

@@ -5,6 +5,21 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Collector Extension</title>
+    <style>
+        body { min-width: 360px; margin: 12px; font: 14px/1.35 system-ui, sans-serif; color: #1a1a1a; }
+        table { font-size: 13px; }
+        #shop-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid #ddd; }
+        #shop-section h2 { margin: 0 0 10px; font-size: 16px; }
+        #shop-section label { display: block; margin: 8px 0; font-size: 14px; cursor: pointer; }
+        #shop-section fieldset { margin: 10px 0; padding: 4px 10px; border: 1px solid #ddd; border-radius: 6px; }
+        #shop-section legend { font-size: 13px; font-weight: 600; }
+        #shop-section .shop-hint { display: block; margin-left: 22px; font-size: 13px; color: #555; }
+        #shop-section .shop-line { margin: 8px 0; font-size: 14px; }
+        #shop-section .shop-line strong { font-size: 16px; }
+        #shop-section .shop-warn { margin: 6px 0; padding-left: 18px; font-size: 13px; color: #a15c00; }
+        #shop-refresh { margin-top: 4px; padding: 7px 14px; font-size: 14px; cursor: pointer; }
+        #shop-login { font-weight: 600; }
+    </style>
 </head>
 <body>
     <table>
@@ -17,6 +32,40 @@
         <tbody></tbody>
     </table>
 
+    <section id="shop-section">
+        <h2>Marcas en las tiendas</h2>
+
+        <label><input type="checkbox" id="shop-enabled"> Mostrar las marcas en las tiendas</label>
+
+        <fieldset>
+            <legend>Cómo se ven</legend>
+            <label>
+                <input type="radio" name="shop-variant" value="a"> Pastilla
+                <span class="shop-hint">En la esquina de la foto, con el número grande. De un vistazo: la tengo o no.</span>
+            </label>
+            <label>
+                <input type="radio" name="shop-variant" value="b"> Franja
+                <span class="shop-hint">Dos líneas al pie de la foto con tu stock, tu precio y el market. Se lee sin pasar el mouse.</span>
+            </label>
+            <label>
+                <input type="radio" name="shop-variant" value="c"> Decisión
+                <span class="shop-hint">Salta a la vista qué comprar: lo que tenés se apaga y lo que falta lleva borde de color.</span>
+            </label>
+        </fieldset>
+
+        <label><input type="checkbox" id="shop-dim-owned"> Apagar las cartas que ya tengo</label>
+
+        <p class="shop-line">Tus datos: <strong id="shop-age"></strong></p>
+        <p class="shop-line">
+            Sesión del admin: <strong id="shop-session"></strong>
+            <a id="shop-login" target="_blank" rel="noopener" hidden>Entrar al admin</a>
+        </p>
+        <ul id="shop-warnings" class="shop-warn" hidden></ul>
+
+        <button type="button" id="shop-refresh">Actualizar ahora</button>
+    </section>
+
+    <script src="scripts/lib/shop-core.js"></script>
     <script type="module" src="scripts/popup.js"></script>
 </body>
 </html>

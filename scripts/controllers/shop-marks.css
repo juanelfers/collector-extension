@@ -1,0 +1,488 @@
+/* Shop marks. Injected on stores whose CSS is unknown, so:
+   - Everything of ours resets with all: initial and says its own font, color and box.
+   - On store elements only the opacity of images and, on the box a mark is positioned
+     against, isolation plus position: relative when it is static.
+   - That position moves nothing unless the box holds an absolute child positioned against
+     something further out, because it would capture it. shop-marks.js (safeAnchor) uses
+     that further box instead in that case. Still possible: a pinned box paints over a
+     sticky bar with no z-index earlier in the page. No store seen so far does it. */
+
+.pa-shop-root,
+.pa-shop-root * {
+    all: initial !important;
+    box-sizing: border-box !important;
+    display: block !important;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    font-style: normal !important;
+    line-height: 1.3 !important;
+    letter-spacing: normal !important;
+    text-align: left !important;
+    text-transform: none !important;
+    text-decoration: none !important;
+    white-space: normal !important;
+    color: #111827 !important;
+}
+
+.pa-shop-root::before,
+.pa-shop-root::after,
+.pa-shop-root *::before,
+.pa-shop-root *::after {
+    content: none !important;
+    display: none !important;
+}
+
+/* ─── store elements ─────────────────────────────────────────────────────── */
+
+[data-pa-shop-anchor] {
+    isolation: isolate !important;
+}
+
+[data-pa-shop-anchor='pin'] {
+    position: relative !important;
+}
+
+html[data-pa-shop-dim='1'] [data-pa-shop-owned='1'] img,
+html[data-pa-shop-variant='c'] [data-pa-shop-owned='1'] img {
+    opacity: 0.32 !important;
+    filter: grayscale(1) !important;
+}
+
+html[data-pa-shop-dim='1'] [data-pa-shop-owned='1']:hover img,
+html[data-pa-shop-variant='c'] [data-pa-shop-owned='1']:hover img {
+    opacity: 1 !important;
+    filter: none !important;
+}
+
+/* ─── frame: variant c. Over everything in the card, and it lets every click through ─ */
+
+.pa-shop-frame {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 40 !important;
+    border: 4px solid transparent !important;
+    pointer-events: none !important;
+}
+
+.pa-shop-frame[data-pa-shop-state='wanted'] {
+    border-color: #ba4eff !important;
+}
+
+.pa-shop-frame[data-pa-shop-state='reorder'] {
+    border-color: #f5ce4b !important;
+}
+
+.pa-shop-frame[data-pa-shop-doubtful='1'] {
+    border: 2px dashed #6b7280 !important;
+}
+
+/* ─── stamp: variant a, and the labels of variant c ──────────────────────── */
+
+.pa-shop-mark {
+    position: absolute !important;
+    top: 6px !important;
+    left: 6px !important;
+    z-index: 30 !important;
+    display: inline-block !important;
+    max-width: calc(100% - 12px) !important;
+    padding: 5px 10px 6px !important;
+    border-radius: 8px !important;
+    border: 2px solid transparent !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+    cursor: pointer !important;
+    pointer-events: auto !important;
+}
+
+.pa-shop-word {
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    line-height: 1.1 !important;
+    white-space: nowrap !important;
+    color: inherit !important;
+}
+
+.pa-shop-badge {
+    font-size: 21px !important;
+    font-weight: 800 !important;
+    line-height: 1.1 !important;
+    color: inherit !important;
+}
+
+.pa-shop-mark-num .pa-shop-badge {
+    font-size: 32px !important;
+    font-weight: 900 !important;
+    line-height: 1 !important;
+    font-variant-numeric: tabular-nums !important;
+}
+
+/* Variant c: the count of what he has is small on purpose; what to buy jumps out. */
+html[data-pa-shop-variant='c'] .pa-shop-mark {
+    display: inline-flex !important;
+    flex-wrap: wrap !important;
+    align-items: baseline !important;
+    gap: 5px !important;
+    padding: 3px 8px !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45) !important;
+}
+
+html[data-pa-shop-variant='c'] .pa-shop-word,
+html[data-pa-shop-variant='c'] .pa-shop-badge {
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    line-height: 1.2 !important;
+}
+
+/* The verdict goes first and the sales under it. */
+html[data-pa-shop-variant='c'] .pa-shop-mark-big {
+    flex-direction: column-reverse !important;
+    align-items: flex-start !important;
+    gap: 1px !important;
+    padding: 6px 9px 7px !important;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.55) !important;
+}
+
+/* REPONER has to fit a TCGplayer photo of 134px. */
+html[data-pa-shop-variant='c'] .pa-shop-mark-big .pa-shop-badge {
+    font-size: 21px !important;
+    font-weight: 900 !important;
+    line-height: 1.05 !important;
+    letter-spacing: 0.01em !important;
+}
+
+html[data-pa-shop-variant='c'] .pa-shop-mark-big .pa-shop-word {
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    line-height: 1.15 !important;
+}
+
+/* ─── strip: variant b ───────────────────────────────────────────────────── */
+
+.pa-shop-strip {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 30 !important;
+    padding: 6px 10px 7px !important;
+    border-top: 3px solid rgba(0, 0, 0, 0.35) !important;
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.3) !important;
+    cursor: pointer !important;
+    pointer-events: auto !important;
+}
+
+.pa-shop-strip-first {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: baseline !important;
+    column-gap: 8px !important;
+    color: inherit !important;
+}
+
+.pa-shop-strip-label {
+    display: inline !important;
+    font-size: 18px !important;
+    font-weight: 900 !important;
+    line-height: 1.15 !important;
+    color: inherit !important;
+}
+
+.pa-shop-strip-web {
+    display: inline !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    line-height: 1.25 !important;
+    color: inherit !important;
+}
+
+.pa-shop-strip-second {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    column-gap: 10px !important;
+    margin-top: 1px !important;
+    color: inherit !important;
+}
+
+.pa-shop-strip-fact {
+    display: inline !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    line-height: 1.25 !important;
+    white-space: nowrap !important;
+    color: inherit !important;
+}
+
+/* ─── colors by state: the same for pill, strip and the details headline ─── */
+
+.pa-shop-mark[data-pa-shop-state='have'],
+.pa-shop-strip[data-pa-shop-state='have'] {
+    background: #15803d !important;
+    color: #ffffff !important;
+}
+
+.pa-shop-mark[data-pa-shop-state='wanted'],
+.pa-shop-strip[data-pa-shop-state='wanted'] {
+    background: #ba4eff !important;
+    color: #090611 !important;
+}
+
+.pa-shop-mark[data-pa-shop-state='reorder'],
+.pa-shop-strip[data-pa-shop-state='reorder'] {
+    background: #f5ce4b !important;
+    color: #090611 !important;
+}
+
+.pa-shop-mark[data-pa-shop-state='none'],
+.pa-shop-strip[data-pa-shop-state='none'],
+.pa-shop-mark[data-pa-shop-state='loading'],
+.pa-shop-strip[data-pa-shop-state='loading'] {
+    background: #f3f4f6 !important;
+    color: #1f2937 !important;
+    border-color: #6b7280 !important;
+}
+
+.pa-shop-mark[data-pa-shop-state='loading'],
+.pa-shop-strip[data-pa-shop-state='loading'] {
+    color: #4b5563 !important;
+}
+
+/* Copies of the other printing only: green, but not the solid green of "skip this one". */
+.pa-shop-mark[data-pa-shop-other='1'][data-pa-shop-state='have'],
+.pa-shop-strip[data-pa-shop-other='1'][data-pa-shop-state='have'] {
+    background: #ffffff !important;
+    color: #14532d !important;
+    border: 2px solid #15803d !important;
+}
+
+/* "Tenés 1 normal" has to fit a narrow photo. */
+.pa-shop-mark[data-pa-shop-other='1'] .pa-shop-word {
+    white-space: normal !important;
+}
+
+/* Outlined: the mark does not claim anything it cannot back. Comes last to win over the state. */
+.pa-shop-mark[data-pa-shop-state='unmapped'],
+.pa-shop-strip[data-pa-shop-state='unmapped'],
+.pa-shop-mark[data-pa-shop-doubtful='1'],
+.pa-shop-strip[data-pa-shop-doubtful='1'] {
+    background: #ffffff !important;
+    color: #374151 !important;
+    border: 2px dashed #6b7280 !important;
+}
+
+/* ─── details and panel ──────────────────────────────────────────────────── */
+
+.pa-shop-details,
+.pa-shop-panel {
+    z-index: 2147483000 !important;
+    position: fixed !important;
+    width: 380px !important;
+    max-width: calc(100vw - 16px) !important;
+    overflow-y: auto !important;
+    background: #ffffff !important;
+    border: 1px solid #9ca3af !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32) !important;
+    pointer-events: auto !important;
+}
+
+.pa-shop-details {
+    max-height: calc(100vh - 16px) !important;
+    padding: 12px 14px !important;
+}
+
+/* Bottom left: stores put the photo there, not the buy button, and cart drawers open on the right. */
+.pa-shop-panel {
+    left: 16px !important;
+    bottom: 16px !important;
+    max-height: calc(100vh - 32px) !important;
+    padding: 12px 14px !important;
+}
+
+.pa-shop-panel[data-pa-shop-collapsed='1'] {
+    width: auto !important;
+    min-width: 220px !important;
+    padding: 8px 12px !important;
+}
+
+.pa-shop-panel-head {
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+}
+
+.pa-shop-panel-title {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+}
+
+.pa-shop-panel-market {
+    margin-top: 2px !important;
+    font-size: 15px !important;
+    font-weight: 700 !important;
+}
+
+.pa-shop-panel-toggle {
+    flex: 0 0 auto !important;
+    padding: 4px 10px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #1f2937 !important;
+    background: #f3f4f6 !important;
+    border: 1px solid #9ca3af !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+}
+
+.pa-shop-headline {
+    font-size: 22px !important;
+    font-weight: 800 !important;
+    line-height: 1.2 !important;
+    color: #1f2937 !important;
+}
+
+.pa-shop-headline[data-pa-shop-state='have'] {
+    color: #15803d !important;
+}
+
+.pa-shop-headline[data-pa-shop-state='wanted'] {
+    color: #8a1fd1 !important;
+}
+
+/* Amber text does not read on white: the band carries the color. */
+.pa-shop-headline[data-pa-shop-state='reorder'] {
+    display: inline-block !important;
+    padding: 1px 8px !important;
+    color: #090611 !important;
+    background: #f5ce4b !important;
+    border-radius: 6px !important;
+}
+
+.pa-shop-headline[data-pa-shop-state='unmapped'],
+.pa-shop-headline[data-pa-shop-state='loading'] {
+    color: #4b5563 !important;
+}
+
+.pa-shop-headline[data-pa-shop-doubtful='1'] {
+    color: #374151 !important;
+    background: transparent !important;
+}
+
+.pa-shop-body {
+    margin-top: 6px !important;
+}
+
+.pa-shop-doubt {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    margin-bottom: 8px !important;
+    padding: 6px 8px !important;
+    border: 2px dashed #6b7280 !important;
+    border-radius: 8px !important;
+}
+
+.pa-shop-doubt-text {
+    font-size: 15px !important;
+    font-weight: 800 !important;
+    color: #374151 !important;
+}
+
+.pa-shop-thumb {
+    display: block !important;
+    width: 64px !important;
+    height: auto !important;
+    flex: 0 0 auto !important;
+    border-radius: 4px !important;
+}
+
+.pa-shop-card-name {
+    font-size: 15px !important;
+    font-weight: 700 !important;
+}
+
+.pa-shop-card-id {
+    margin-top: 1px !important;
+    color: #4b5563 !important;
+}
+
+.pa-shop-stats {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10px 12px !important;
+    margin-top: 10px !important;
+}
+
+.pa-shop-stat-label {
+    color: #4b5563 !important;
+}
+
+.pa-shop-stat-value {
+    font-size: 22px !important;
+    font-weight: 800 !important;
+    line-height: 1.15 !important;
+    font-variant-numeric: tabular-nums !important;
+}
+
+.pa-shop-stat-sub {
+    color: #4b5563 !important;
+}
+
+.pa-shop-lines {
+    margin-top: 10px !important;
+    padding-top: 8px !important;
+    border-top: 1px solid #e5e7eb !important;
+}
+
+.pa-shop-line {
+    margin-top: 3px !important;
+    font-size: 14px !important;
+}
+
+.pa-shop-body > .pa-shop-line {
+    margin-top: 10px !important;
+}
+
+.pa-shop-warn {
+    font-weight: 700 !important;
+    color: #b45309 !important;
+}
+
+.pa-shop-good {
+    font-weight: 700 !important;
+    color: #15803d !important;
+}
+
+.pa-shop-link {
+    display: inline !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: #1d4ed8 !important;
+    text-decoration: underline !important;
+    cursor: pointer !important;
+}
+
+/* ─── no session, or own data too old. shop-marks.js lifts it over the panel ─ */
+
+.pa-shop-login,
+.pa-shop-old-data {
+    position: fixed !important;
+    left: 16px !important;
+    bottom: 16px !important;
+    z-index: 2147483000 !important;
+    padding: 7px 14px !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: #ffffff !important;
+    background: #111827 !important;
+    border-radius: 999px !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+    cursor: pointer !important;
+    pointer-events: auto !important;
+}
+
+/* Says something, leads nowhere. */
+.pa-shop-old-data {
+    background: #92400e !important;
+    cursor: default !important;
+}
