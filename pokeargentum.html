@@ -1,69 +1,176 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collector Extension</title>
+    <title>PokeArgentum</title>
     <style>
-        body { min-width: 360px; margin: 12px; font: 14px/1.35 system-ui, sans-serif; color: #1a1a1a; }
-        table { font-size: 13px; }
-        #shop-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid #ddd; }
-        #shop-section h2 { margin: 0 0 10px; font-size: 16px; }
-        #shop-section label { display: block; margin: 8px 0; font-size: 14px; cursor: pointer; }
-        #shop-section fieldset { margin: 10px 0; padding: 4px 10px; border: 1px solid #ddd; border-radius: 6px; }
-        #shop-section legend { font-size: 13px; font-weight: 600; }
-        #shop-section .shop-hint { display: block; margin-left: 22px; font-size: 13px; color: #555; }
-        #shop-section .shop-line { margin: 8px 0; font-size: 14px; }
-        #shop-section .shop-line strong { font-size: 16px; }
-        #shop-section .shop-warn { margin: 6px 0; padding-left: 18px; font-size: 13px; color: #a15c00; }
-        #shop-refresh { margin-top: 4px; padding: 7px 14px; font-size: 14px; cursor: pointer; }
-        #shop-login { font-weight: 600; }
+        :root {
+            --ink: #090611;
+            --paper: #ffffff;
+            --muted: #4b4458;
+            --line: #ece7f3;
+            --tint: #f3eefa;
+            --violet: #ba4eff;
+            --violet-ink: #6d28d9;
+            --yellow: #f5ce4b;
+            --green: #15803d;
+            --warn: #92400e;
+        }
+        * { box-sizing: border-box; }
+        [hidden] { display: none !important; }
+        body { width: 380px; margin: 0; font: 14px/1.35 'Segoe UI', system-ui, sans-serif; color: var(--ink); background: var(--paper); }
+        button, input, select { font: inherit; color: inherit; }
+
+        .top { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--yellow); border-bottom: 2px solid var(--ink); }
+        .top img { display: block; flex: 0 0 auto; }
+        .brand { font-size: 18px; font-weight: 900; line-height: 1.1; }
+        .version { font-size: 13px; font-weight: 600; color: #3b3320; }
+        .top .grow { flex: 1 1 auto; }
+
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 14px; font-size: 14px; font-weight: 800; background: var(--paper); border: 2px solid var(--ink); border-radius: 8px; box-shadow: 2px 2px 0 var(--ink); cursor: pointer; }
+        .btn:hover { background: var(--tint); }
+        .btn:active { transform: translate(2px, 2px); box-shadow: none; }
+        .btn:disabled { opacity: 0.6; cursor: progress; }
+        .btn-primary { background: var(--violet); }
+        .btn-primary:hover { background: #a93cf0; }
+        .btn-block { width: 100%; }
+
+        section { padding: 12px 14px; border-bottom: 2px solid var(--line); }
+        h2 { margin: 0 0 8px; font-size: 16px; font-weight: 900; }
+
+        /* This tab: the store, and what is on it. */
+        #tab-section { background: var(--tint); border-bottom: 2px solid var(--ink); }
+        .tab-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .tab-store { font-size: 16px; font-weight: 900; }
+        .tab-numbers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+        .num { padding: 8px 10px; background: var(--paper); border: 2px solid var(--ink); border-radius: 8px; }
+        .num-value { font-size: 26px; font-weight: 900; line-height: 1.1; font-variant-numeric: tabular-nums; }
+        .num-label { font-size: 13px; font-weight: 700; color: var(--muted); }
+        .num-buy { background: var(--violet); }
+        .num-buy .num-label { color: var(--ink); }
+        .tab-hint { margin: 8px 0 0; font-size: 14px; color: var(--muted); }
+
+        /* A checkbox drawn as a switch. */
+        .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0; font-size: 14px; font-weight: 700; cursor: pointer; }
+        .switch input { appearance: none; flex: 0 0 auto; width: 42px; height: 24px; margin: 0; background: #d9d3e2; border: 2px solid var(--ink); border-radius: 999px; position: relative; cursor: pointer; transition: background 120ms; }
+        .switch input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: var(--paper); border: 2px solid var(--ink); border-radius: 50%; box-sizing: border-box; transition: left 120ms; }
+        .switch input:checked { background: var(--green); }
+        .switch input:checked::after { left: 20px; }
+        .switch input:focus-visible { outline: 2px solid var(--violet-ink); outline-offset: 2px; }
+        .switch-inline { margin: 0; gap: 8px; font-size: 14px; }
+
+        /* The three looks, as tiles: the chosen one in violet. */
+        fieldset { margin: 10px 0; padding: 0; border: 0; }
+        legend { margin-bottom: 6px; padding: 0; font-size: 14px; font-weight: 800; }
+        .looks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+        .look { display: block; padding: 7px 8px 8px; border: 2px solid var(--ink); border-radius: 8px; cursor: pointer; }
+        .look:hover { background: var(--tint); }
+        .look input { position: absolute; opacity: 0; pointer-events: none; }
+        .look:has(input:checked) { background: var(--violet); box-shadow: 2px 2px 0 var(--ink); }
+        .look:has(input:focus-visible) { outline: 2px solid var(--violet-ink); outline-offset: 2px; }
+        .look-name { display: block; font-size: 14px; font-weight: 900; }
+        .look-hint { display: block; margin-top: 2px; font-size: 13px; line-height: 1.25; color: var(--muted); }
+        .look:has(input:checked) .look-hint { color: var(--ink); }
+
+        .status { margin-top: 10px; padding: 10px 12px; border: 2px solid var(--ink); border-radius: 10px; }
+        .status-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 2px 0 6px; }
+        .status-row > span { color: var(--muted); font-weight: 700; }
+        .status-row strong { font-size: 15px; font-weight: 900; text-align: right; }
+        #shop-login { font-weight: 800; color: var(--violet-ink); }
+        .warn-list { margin: 6px 0; padding-left: 18px; font-size: 13px; font-weight: 700; color: var(--warn); }
+        #shop-refresh { margin-top: 4px; }
+
+        .foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px 12px; }
+        .shortcut { font-size: 13px; color: var(--muted); }
+        .btn-small { padding: 4px 10px; font-size: 13px; box-shadow: 1px 1px 0 var(--ink); }
+        kbd { display: inline-block; padding: 0 5px; font: 700 13px/1.5 'Segoe UI', system-ui, sans-serif; color: var(--ink); background: var(--tint); border: 1px solid #b9b0c7; border-bottom-width: 2px; border-radius: 4px; }
+
+        #collections-section summary { font-weight: 800; cursor: pointer; }
+        #collections-section table { width: 100%; margin-top: 6px; font-size: 13px; border-collapse: collapse; }
+        #collections-section th, #collections-section td { padding: 3px 4px; text-align: left; border-bottom: 1px solid var(--line); }
     </style>
 </head>
 <body>
-    <table>
-        <thead>
-            <tr>
-                <th>Collection name</th>
-                <th>Cards</th>
-            </tr>
-        </thead>
-        <tbody></tbody>
-    </table>
+    <header class="top">
+        <img src="icons/icon-48.png" width="40" height="40" alt="">
+        <div class="grow">
+            <div class="brand">PokeArgentum</div>
+            <div class="version" id="version"></div>
+        </div>
+        <button type="button" class="btn" id="open-options">Opciones</button>
+    </header>
+
+    <section id="tab-section" hidden>
+        <div class="tab-head">
+            <div class="tab-store" id="tab-store"></div>
+            <label class="switch switch-inline">Marcas acá <input type="checkbox" id="tab-store-on"></label>
+        </div>
+        <div class="tab-numbers" id="tab-numbers">
+            <div class="num num-buy"><div class="num-value" id="tab-buy">0</div><div class="num-label">para comprar</div></div>
+            <div class="num"><div class="num-value" id="tab-have">0</div><div class="num-label">ya tenés</div></div>
+            <div class="num"><div class="num-value" id="tab-cards">0</div><div class="num-label">marcadas</div></div>
+        </div>
+        <button type="button" class="btn btn-block" id="tab-panel" hidden>Mostrar el panel de la carta</button>
+        <p class="tab-hint" id="tab-hint" hidden></p>
+    </section>
 
     <section id="shop-section">
         <h2>Marcas en las tiendas</h2>
 
-        <label><input type="checkbox" id="shop-enabled"> Mostrar las marcas en las tiendas</label>
+        <label class="switch">Mostrar las marcas <input type="checkbox" id="shop-enabled"></label>
 
         <fieldset>
             <legend>Cómo se ven</legend>
-            <label>
-                <input type="radio" name="shop-variant" value="a"> Pastilla
-                <span class="shop-hint">En la esquina de la foto, con el número grande. De un vistazo: la tengo o no.</span>
-            </label>
-            <label>
-                <input type="radio" name="shop-variant" value="b"> Franja
-                <span class="shop-hint">Dos líneas al pie de la foto con tu stock, tu precio y el market. Se lee sin pasar el mouse.</span>
-            </label>
-            <label>
-                <input type="radio" name="shop-variant" value="c"> Decisión
-                <span class="shop-hint">Salta a la vista qué comprar: lo que tenés se apaga y lo que falta lleva borde de color.</span>
-            </label>
+            <div class="looks">
+                <label class="look">
+                    <input type="radio" name="shop-variant" value="a">
+                    <span class="look-name">Pastilla</span>
+                    <span class="look-hint">El número grande en la foto</span>
+                </label>
+                <label class="look">
+                    <input type="radio" name="shop-variant" value="b">
+                    <span class="look-name">Franja</span>
+                    <span class="look-hint">Stock, precio y market al pie</span>
+                </label>
+                <label class="look">
+                    <input type="radio" name="shop-variant" value="c">
+                    <span class="look-name">Decisión</span>
+                    <span class="look-hint">Lo que falta salta a la vista</span>
+                </label>
+            </div>
         </fieldset>
 
-        <label><input type="checkbox" id="shop-dim-owned"> Apagar las cartas que ya tengo</label>
+        <label class="switch">Apagar las cartas que ya tengo <input type="checkbox" id="shop-dim-owned"></label>
 
-        <p class="shop-line">Tus datos: <strong id="shop-age"></strong></p>
-        <p class="shop-line">
-            Sesión del admin: <strong id="shop-session"></strong>
-            <a id="shop-login" target="_blank" rel="noopener" hidden>Entrar al admin</a>
-        </p>
-        <ul id="shop-warnings" class="shop-warn" hidden></ul>
-
-        <button type="button" id="shop-refresh">Actualizar ahora</button>
+        <div class="status">
+            <div class="status-row"><span>Tus datos</span><strong id="shop-age"></strong></div>
+            <div class="status-row">
+                <span>Sesión del admin</span>
+                <strong><span id="shop-session"></span> <a id="shop-login" target="_blank" rel="noopener" hidden>Entrar</a></strong>
+            </div>
+            <ul id="shop-warnings" class="warn-list" hidden></ul>
+            <button type="button" class="btn btn-primary btn-block" id="shop-refresh">Actualizar ahora</button>
+        </div>
     </section>
+
+    <details id="collections-section" hidden>
+        <summary>Colecciones</summary>
+        <table>
+            <thead>
+                <tr>
+                    <th>Colección</th>
+                    <th>Cartas</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </details>
+
+    <div class="foot">
+        <span class="shortcut">Atajo del panel: <kbd id="shortcut-keys">Alt+Shift+P</kbd></span>
+        <button type="button" class="btn btn-small" id="shortcut-set" hidden>Asignar atajo</button>
+    </div>
 
     <script src="scripts/lib/shop-core.js"></script>
     <script type="module" src="scripts/popup.js"></script>

@@ -7,8 +7,11 @@
      that further box instead in that case. Still possible: a pinned box paints over a
      sticky bar with no z-index earlier in the page. No store seen so far does it. */
 
+/* SVG stays out of the reset: `all` would also wipe `d`, the path itself. .pa-shop-ico styles
+   them below. :where() keeps this selector as weak as `.pa-shop-root *` was, so every single
+   class rule further down still wins by coming later. */
 .pa-shop-root,
-.pa-shop-root * {
+.pa-shop-root :where(:not(svg, svg *)) {
     all: initial !important;
     box-sizing: border-box !important;
     display: block !important;
@@ -269,214 +272,561 @@ html[data-pa-shop-variant='c'] .pa-shop-mark-big .pa-shop-word {
     border: 2px dashed #6b7280 !important;
 }
 
-/* ─── details and panel ──────────────────────────────────────────────────── */
+/* ─── details and panel ──────────────────────────────────────────────────────
+   The PokeArgentum hand: flat colors, a 2px ink outline and a hard shadow with no blur.
+   The head is the verdict and carries the state's color; the body reads like a decision:
+   which card, the price here against the market, what it does in our store, the fine print.
+   Nothing under 13px. */
 
-.pa-shop-details,
-.pa-shop-panel {
-    z-index: 2147483000 !important;
+.pa-shop-card {
     position: fixed !important;
-    width: 380px !important;
+    z-index: 2147483000 !important;
     max-width: calc(100vw - 16px) !important;
+    max-height: calc(100vh - 16px) !important;
+    overflow-x: hidden !important;
     overflow-y: auto !important;
+    overscroll-behavior: contain !important;
     background: #ffffff !important;
-    border: 1px solid #9ca3af !important;
+    color: #090611 !important;
+    border: 2px solid #090611 !important;
     border-radius: 12px !important;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32) !important;
+    box-shadow: 4px 4px 0 #090611 !important;
     pointer-events: auto !important;
 }
 
-.pa-shop-details {
-    max-height: calc(100vh - 16px) !important;
-    padding: 12px 14px !important;
-}
-
-/* Bottom left: stores put the photo there, not the buy button, and cart drawers open on the right. */
+.pa-shop-details,
 .pa-shop-panel {
-    left: 16px !important;
-    bottom: 16px !important;
-    max-height: calc(100vh - 32px) !important;
-    padding: 12px 14px !important;
+    width: 432px !important;
 }
 
 .pa-shop-panel[data-pa-shop-collapsed='1'] {
     width: auto !important;
-    min-width: 220px !important;
-    padding: 8px 12px !important;
+    min-width: 300px !important;
+    max-width: min(440px, calc(100vw - 16px)) !important;
 }
 
-.pa-shop-panel-head {
+/* "Grande" in the options: everything inside a size up, the box wide enough to keep the layout. */
+.pa-shop-panel[data-pa-shop-size='large'] {
+    width: 497px !important;
+}
+
+.pa-shop-panel[data-pa-shop-size='large'][data-pa-shop-collapsed='1'] {
+    width: auto !important;
+    max-width: min(510px, calc(100vw - 16px)) !important;
+}
+
+.pa-shop-panel[data-pa-shop-size='large'] .pa-shop-inner {
+    zoom: 1.15 !important;
+}
+
+.pa-shop-panel[data-pa-shop-dragging='1'] {
+    box-shadow: 7px 7px 0 #090611 !important;
+}
+
+/* ─── head: the verdict, in the state's color ────────────────────────────── */
+
+.pa-shop-head {
     display: flex !important;
-    align-items: flex-start !important;
-    justify-content: space-between !important;
-    gap: 10px !important;
+    align-items: center !important;
+    gap: 6px !important;
+    min-height: 54px !important;
+    padding: 8px 8px 8px 14px !important;
+    border-bottom: 2px solid #090611 !important;
+    background: #eceaf0 !important;
+    color: #090611 !important;
 }
 
-.pa-shop-panel-title {
-    flex: 1 1 auto !important;
-    min-width: 0 !important;
+.pa-shop-panel .pa-shop-head {
+    padding-left: 6px !important;
+    cursor: grab !important;
+    touch-action: none !important;
+    user-select: none !important;
 }
 
-.pa-shop-panel-market {
-    margin-top: 2px !important;
-    font-size: 15px !important;
-    font-weight: 700 !important;
+.pa-shop-panel[data-pa-shop-dragging='1'] .pa-shop-head {
+    cursor: grabbing !important;
 }
 
-.pa-shop-panel-toggle {
+.pa-shop-grip {
+    display: flex !important;
     flex: 0 0 auto !important;
-    padding: 4px 10px !important;
-    font-size: 13px !important;
-    font-weight: 600 !important;
-    color: #1f2937 !important;
-    background: #f3f4f6 !important;
-    border: 1px solid #9ca3af !important;
-    border-radius: 6px !important;
+    color: inherit !important;
+}
+
+.pa-shop-verdict {
+    display: flex !important;
+    flex: 1 1 auto !important;
+    flex-wrap: wrap !important;
+    align-items: baseline !important;
+    column-gap: 8px !important;
+    min-width: 0 !important;
+    color: inherit !important;
+}
+
+.pa-shop-verdict-big {
+    display: inline !important;
+    font-size: 24px !important;
+    font-weight: 900 !important;
+    line-height: 1.15 !important;
+    color: inherit !important;
+}
+
+.pa-shop-verdict-small {
+    display: inline !important;
+    font-size: 16px !important;
+    font-weight: 700 !important;
+    line-height: 1.3 !important;
+    color: inherit !important;
+}
+
+.pa-shop-head-buttons {
+    display: flex !important;
+    flex: 0 0 auto !important;
+    gap: 2px !important;
+    color: inherit !important;
+}
+
+.pa-shop-icon-button {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 34px !important;
+    height: 34px !important;
+    color: inherit !important;
+    background: transparent !important;
+    border: 2px solid transparent !important;
+    border-radius: 8px !important;
     cursor: pointer !important;
 }
 
-.pa-shop-headline {
-    font-size: 22px !important;
-    font-weight: 800 !important;
-    line-height: 1.2 !important;
-    color: #1f2937 !important;
+.pa-shop-icon-button:hover {
+    background: rgba(9, 6, 17, 0.12) !important;
 }
 
-.pa-shop-headline[data-pa-shop-state='have'] {
-    color: #15803d !important;
+.pa-shop-icon-button:focus-visible {
+    border-color: currentColor !important;
 }
 
-.pa-shop-headline[data-pa-shop-state='wanted'] {
-    color: #8a1fd1 !important;
+.pa-shop-head[data-pa-shop-state='have'] {
+    background: #15803d !important;
+    color: #ffffff !important;
 }
 
-/* Amber text does not read on white: the band carries the color. */
-.pa-shop-headline[data-pa-shop-state='reorder'] {
-    display: inline-block !important;
-    padding: 1px 8px !important;
+.pa-shop-head[data-pa-shop-state='have'] .pa-shop-icon-button:hover {
+    background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.pa-shop-head[data-pa-shop-state='wanted'] {
+    background: #ba4eff !important;
     color: #090611 !important;
+}
+
+.pa-shop-head[data-pa-shop-state='reorder'] {
     background: #f5ce4b !important;
-    border-radius: 6px !important;
+    color: #090611 !important;
 }
 
-.pa-shop-headline[data-pa-shop-state='unmapped'],
-.pa-shop-headline[data-pa-shop-state='loading'] {
-    color: #4b5563 !important;
+/* Copies of the other printing only: green, but not the solid green of "skip this one". */
+.pa-shop-head[data-pa-shop-other='1'][data-pa-shop-state='have'] {
+    background: #dcfce7 !important;
+    color: #14532d !important;
 }
 
-.pa-shop-headline[data-pa-shop-doubtful='1'] {
+.pa-shop-head[data-pa-shop-other='1'][data-pa-shop-state='have'] .pa-shop-icon-button:hover {
+    background: rgba(9, 6, 17, 0.12) !important;
+}
+
+/* It does not claim anything it cannot back: white, and a dashed line. Last, so it wins. */
+.pa-shop-head[data-pa-shop-state='unmapped'],
+.pa-shop-head[data-pa-shop-state='loading'],
+.pa-shop-head[data-pa-shop-doubtful='1'] {
+    background: #ffffff !important;
     color: #374151 !important;
-    background: transparent !important;
+    border-bottom: 2px dashed #6b7280 !important;
 }
 
-.pa-shop-body {
-    margin-top: 6px !important;
-}
+/* ─── a line under the head: no session, or own data too old ─────────────── */
 
-.pa-shop-doubt {
-    display: flex !important;
-    align-items: center !important;
-    gap: 10px !important;
-    margin-bottom: 8px !important;
-    padding: 6px 8px !important;
-    border: 2px dashed #6b7280 !important;
-    border-radius: 8px !important;
-}
-
-.pa-shop-doubt-text {
-    font-size: 15px !important;
-    font-weight: 800 !important;
-    color: #374151 !important;
-}
-
-.pa-shop-thumb {
-    display: block !important;
-    width: 64px !important;
-    height: auto !important;
-    flex: 0 0 auto !important;
-    border-radius: 4px !important;
-}
-
-.pa-shop-card-name {
-    font-size: 15px !important;
-    font-weight: 700 !important;
-}
-
-.pa-shop-card-id {
-    margin-top: 1px !important;
-    color: #4b5563 !important;
-}
-
-.pa-shop-stats {
-    display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
-    gap: 10px 12px !important;
-    margin-top: 10px !important;
-}
-
-.pa-shop-stat-label {
-    color: #4b5563 !important;
-}
-
-.pa-shop-stat-value {
-    font-size: 22px !important;
-    font-weight: 800 !important;
-    line-height: 1.15 !important;
-    font-variant-numeric: tabular-nums !important;
-}
-
-.pa-shop-stat-sub {
-    color: #4b5563 !important;
-}
-
-.pa-shop-lines {
-    margin-top: 10px !important;
-    padding-top: 8px !important;
-    border-top: 1px solid #e5e7eb !important;
-}
-
-.pa-shop-line {
-    margin-top: 3px !important;
+.pa-shop-notice {
+    padding: 9px 14px !important;
     font-size: 14px !important;
-}
-
-.pa-shop-body > .pa-shop-line {
-    margin-top: 10px !important;
-}
-
-.pa-shop-warn {
     font-weight: 700 !important;
-    color: #b45309 !important;
+    background: #fff4d6 !important;
+    border-bottom: 2px solid #090611 !important;
 }
 
-.pa-shop-good {
-    font-weight: 700 !important;
-    color: #15803d !important;
-}
-
-.pa-shop-link {
+.pa-shop-notice-link {
     display: inline !important;
     font-size: 14px !important;
-    font-weight: 600 !important;
-    color: #1d4ed8 !important;
+    font-weight: 800 !important;
+    color: #6d28d9 !important;
     text-decoration: underline !important;
     cursor: pointer !important;
 }
 
-/* ─── no session, or own data too old. shop-marks.js lifts it over the panel ─ */
+/* ─── body ───────────────────────────────────────────────────────────────── */
 
-.pa-shop-login,
-.pa-shop-old-data {
-    position: fixed !important;
-    left: 16px !important;
-    bottom: 16px !important;
-    z-index: 2147483000 !important;
-    padding: 7px 14px !important;
+.pa-shop-body {
+    padding: 14px 16px 16px !important;
+}
+
+.pa-shop-identity {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+}
+
+.pa-shop-thumb {
+    display: block !important;
+    flex: 0 0 auto !important;
+    width: 60px !important;
+    height: 84px !important;
+    object-fit: contain !important;
+    border-radius: 4px !important;
+}
+
+.pa-shop-identity-text {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+}
+
+.pa-shop-card-name {
+    font-size: 18px !important;
+    font-weight: 800 !important;
+    line-height: 1.2 !important;
+}
+
+.pa-shop-card-id {
+    margin-top: 3px !important;
     font-size: 14px !important;
-    font-weight: 600 !important;
-    color: #ffffff !important;
-    background: #111827 !important;
+    line-height: 1.35 !important;
+    color: #4b4458 !important;
+}
+
+.pa-shop-doubt {
+    margin-top: 12px !important;
+    padding: 6px 10px !important;
+    font-size: 15px !important;
+    font-weight: 800 !important;
+    color: #374151 !important;
+    border: 2px dashed #6b7280 !important;
+    border-radius: 8px !important;
+}
+
+/* The price here against the market: the two numbers the decision hangs on. */
+.pa-shop-compare {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    margin-top: 14px !important;
+    border: 2px solid #090611 !important;
+    border-radius: 10px !important;
+    overflow: hidden !important;
+}
+
+.pa-shop-compare-one {
+    grid-template-columns: 1fr !important;
+}
+
+.pa-shop-col {
+    min-width: 0 !important;
+    padding: 10px 12px 12px !important;
+}
+
+.pa-shop-col + .pa-shop-col {
+    border-left: 2px solid #090611 !important;
+}
+
+.pa-shop-col-label {
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    color: #4b4458 !important;
+}
+
+.pa-shop-big {
+    margin-top: 2px !important;
+    font-size: 26px !important;
+    font-weight: 900 !important;
+    line-height: 1.1 !important;
+    font-variant-numeric: tabular-nums !important;
+}
+
+.pa-shop-chips {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+    margin: 6px 0 2px !important;
+}
+
+.pa-shop-chip {
+    display: inline-block !important;
+    padding: 1px 8px 2px !important;
+    font-size: 13px !important;
+    font-weight: 800 !important;
+    line-height: 1.35 !important;
+    white-space: nowrap !important;
+    border: 2px solid #090611 !important;
     border-radius: 999px !important;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+}
+
+.pa-shop-chip[data-pa-shop-tone='good'] {
+    color: #14532d !important;
+    background: #dcfce7 !important;
+    border-color: #15803d !important;
+}
+
+.pa-shop-chip[data-pa-shop-tone='bad'] {
+    color: #78350f !important;
+    background: #fef3c7 !important;
+    border-color: #d97706 !important;
+}
+
+.pa-shop-sub {
+    margin-top: 3px !important;
+    font-size: 14px !important;
+    line-height: 1.3 !important;
+    color: #4b4458 !important;
+}
+
+/* Something to look at twice: an old price, an offer that is gone, own data too old. */
+.pa-shop-sub.pa-shop-warn,
+.pa-shop-col-label.pa-shop-warn,
+.pa-shop-notice.pa-shop-warn {
+    font-weight: 800 !important;
+    color: #92400e !important;
+}
+
+/* What the card does in our store. */
+.pa-shop-section {
+    margin-top: 14px !important;
+}
+
+.pa-shop-section-label {
+    margin-bottom: 6px !important;
+    font-size: 14px !important;
+    font-weight: 800 !important;
+}
+
+.pa-shop-tiles {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)) !important;
+    gap: 8px !important;
+}
+
+.pa-shop-tile {
+    min-width: 0 !important;
+    padding: 8px 10px 9px !important;
+    background: #f3eefa !important;
+    border-radius: 8px !important;
+}
+
+.pa-shop-tile-label {
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    color: #4b4458 !important;
+}
+
+.pa-shop-tile-value {
+    font-size: 22px !important;
+    font-weight: 900 !important;
+    line-height: 1.15 !important;
+    font-variant-numeric: tabular-nums !important;
+}
+
+.pa-shop-tile-sub {
+    margin-top: 1px !important;
+    font-size: 13px !important;
+    color: #4b4458 !important;
+}
+
+/* The fine print, one fact per line. */
+.pa-shop-notes {
+    margin-top: 14px !important;
+    padding-top: 12px !important;
+    border-top: 2px solid #ece7f3 !important;
+}
+
+.pa-shop-note {
+    display: flex !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+    margin-top: 6px !important;
+    font-size: 14px !important;
+    line-height: 1.35 !important;
+}
+
+.pa-shop-note:first-child {
+    margin-top: 0 !important;
+}
+
+.pa-shop-dot {
+    flex: 0 0 auto !important;
+    width: 8px !important;
+    height: 8px !important;
+    margin-top: 6px !important;
+    background: #8a8299 !important;
+    border-radius: 50% !important;
+}
+
+.pa-shop-note-text {
+    min-width: 0 !important;
+    font-size: 14px !important;
+    line-height: 1.35 !important;
+    color: inherit !important;
+}
+
+.pa-shop-note[data-pa-shop-tone='warn'] {
+    font-weight: 700 !important;
+    color: #92400e !important;
+}
+
+.pa-shop-note[data-pa-shop-tone='warn'] .pa-shop-dot {
+    background: #d97706 !important;
+}
+
+.pa-shop-note[data-pa-shop-tone='good'] {
+    font-weight: 700 !important;
+    color: #166534 !important;
+}
+
+.pa-shop-note[data-pa-shop-tone='good'] .pa-shop-dot {
+    background: #15803d !important;
+}
+
+.pa-shop-note-text,
+.pa-shop-note .pa-shop-note-text {
+    font-weight: inherit !important;
+}
+
+.pa-shop-foot {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 16px !important;
+    margin-top: 14px !important;
+    padding-top: 12px !important;
+    border-top: 2px solid #ece7f3 !important;
+}
+
+.pa-shop-link {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    font-size: 14px !important;
+    font-weight: 800 !important;
+    color: #6d28d9 !important;
+    cursor: pointer !important;
+}
+
+.pa-shop-link:hover {
+    color: #4c1d95 !important;
+}
+
+.pa-shop-link-text {
+    display: inline !important;
+    font-size: inherit !important;
+    font-weight: inherit !important;
+    color: inherit !important;
+    text-decoration: underline !important;
+    text-underline-offset: 2px !important;
+}
+
+/* In a note the link is text that wraps, with its icon at the end of the last line. */
+.pa-shop-note .pa-shop-link {
+    display: inline !important;
+}
+
+.pa-shop-root .pa-shop-note svg.pa-shop-ico.pa-shop-ico-sm {
+    display: inline-block !important;
+    margin-left: 4px !important;
+    vertical-align: -2px !important;
+}
+
+/* The folded panel: one line under the head. */
+.pa-shop-summary {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 6px 14px !important;
+    padding: 10px 14px 12px !important;
+}
+
+.pa-shop-summary-item {
+    display: inline-flex !important;
+    align-items: baseline !important;
+    gap: 6px !important;
+}
+
+.pa-shop-summary-label {
+    display: inline !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    color: #4b4458 !important;
+}
+
+.pa-shop-summary-value {
+    display: inline !important;
+    font-size: 19px !important;
+    font-weight: 900 !important;
+    font-variant-numeric: tabular-nums !important;
+}
+
+/* ─── icons. Not reset above, so every property a store could touch is ours here ─ */
+
+.pa-shop-root svg.pa-shop-ico {
+    display: block !important;
+    flex: 0 0 auto !important;
+    width: 20px !important;
+    height: 20px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: none !important;
+    position: static !important;
+    transform: none !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    overflow: visible !important;
+    pointer-events: none !important;
+    color: inherit !important;
+    fill: none !important;
+    stroke: currentColor !important;
+    stroke-width: 2.4 !important;
+    stroke-linecap: round !important;
+    stroke-linejoin: round !important;
+}
+
+.pa-shop-root svg.pa-shop-ico path {
+    display: inline !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    transform: none !important;
+    fill: none !important;
+    stroke: currentColor !important;
+    stroke-width: inherit !important;
+}
+
+.pa-shop-root .pa-shop-grip svg.pa-shop-ico {
+    stroke-width: 3.6 !important;
+}
+
+.pa-shop-root svg.pa-shop-ico.pa-shop-ico-sm {
+    width: 15px !important;
+    height: 15px !important;
+    stroke-width: 2.6 !important;
+}
+
+/* ─── a pill of its own when there is no panel. shop-marks.js puts it where the panel would be ─ */
+
+.pa-shop-pill {
+    position: fixed !important;
+    z-index: 2147483000 !important;
+    padding: 8px 16px !important;
+    font-size: 14px !important;
+    font-weight: 800 !important;
+    color: #ffffff !important;
+    background: #090611 !important;
+    border: 2px solid #090611 !important;
+    border-radius: 999px !important;
+    box-shadow: 3px 3px 0 #ba4eff !important;
     cursor: pointer !important;
     pointer-events: auto !important;
 }
@@ -484,5 +834,6 @@ html[data-pa-shop-variant='c'] .pa-shop-mark-big .pa-shop-word {
 /* Says something, leads nowhere. */
 .pa-shop-old-data {
     background: #92400e !important;
+    box-shadow: 3px 3px 0 #090611 !important;
     cursor: default !important;
 }

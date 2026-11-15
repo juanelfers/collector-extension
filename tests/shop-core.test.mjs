@@ -19,6 +19,19 @@ const { deriveMark, formatDate, formatPct, formatUsd, productIdFromHref, product
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
 
+// What a settings object with nothing chosen holds.
+const DEFAULTS = {
+    enabled: true,
+    variant: 'c',
+    dimOwned: false,
+    disabledStores: [],
+    panelEnabled: true,
+    panelCorner: 'bottom-left',
+    panelSize: 'normal',
+    panelPositions: {},
+    badge: true,
+};
+
 // ─── links ───────────────────────────────────────────────────────────────────
 
 describe('storeFromHost', () => {
@@ -999,10 +1012,57 @@ describe('shapeOwn and settings', () => {
     });
 
     test('normalizeSettings defaults, validates and keeps fields of the content script', () => {
-        assert.deepEqual(core.normalizeSettings(undefined), { enabled: true, variant: 'a', dimOwned: false });
+        assert.deepEqual(core.normalizeSettings(undefined), DEFAULTS);
         assert.deepEqual(core.normalizeSettings({ variant: 'z', enabled: false, panelOpen: true }), {
-            enabled: false, variant: 'a', dimOwned: false, panelOpen: true,
+            ...DEFAULTS, enabled: false, panelOpen: true,
         });
+    });
+
+    test('the default look is "Decisión" (c), and a saved one wins', () => {
+        assert.equal(core.normalizeSettings(undefined).variant, 'c');
+        assert.equal(core.normalizeSettings({ variant: 'a' }).variant, 'a');
+    });
+
+    test('normalizeSettings: stores off are real store keys, once each', () => {
+        assert.deepEqual(core.normalizeSettings({ disabledStores: ['wulfgaming', 'nope', 'wulfgaming', 'gglehi'] }).disabledStores, ['wulfgaming', 'gglehi']);
+        assert.deepEqual(core.normalizeSettings({ disabledStores: 'wulfgaming' }).disabledStores, []);
+    });
+
+    test('normalizeSettings: panel corner, size and switches fall back when they are not one', () => {
+        const odd = core.normalizeSettings({ panelCorner: 'middle', panelSize: 'huge', panelEnabled: 0, badge: 'no' });
+        assert.equal(odd.panelCorner, 'bottom-left');
+        assert.equal(odd.panelSize, 'normal');
+        assert.equal(odd.panelEnabled, true);
+        assert.equal(odd.badge, true);
+        const off = core.normalizeSettings({ panelCorner: 'top-right', panelSize: 'large', panelEnabled: false, badge: false });
+        assert.deepEqual([off.panelCorner, off.panelSize, off.panelEnabled, off.badge], ['top-right', 'large', false, false]);
+    });
+
+    test('normalizeSettings: dropped positions keep only good anchors of real stores, rounded', () => {
+        const got = core.normalizeSettings({
+            panelPositions: {
+                gglehi: { h: 'right', x: 40.6, v: 'top', y: 90 },
+                tcgplayer: { h: 'middle', x: 1, v: 'top', y: 1 },
+                wulfgaming: { h: 'left', x: -5, v: 'bottom', y: 1 },
+                nope: { h: 'left', x: 1, v: 'top', y: 1 },
+                coolstuffinc: 'x',
+            },
+        });
+        assert.deepEqual(got.panelPositions, { gglehi: { h: 'right', x: 41, v: 'top', y: 90 } });
+        assert.deepEqual(core.normalizeSettings({ panelPositions: [] }).panelPositions, {});
+    });
+
+    test('normalizeSettings: a panelCollapsed that is not a boolean is dropped, so "auto" can be saved', () => {
+        assert.equal('panelCollapsed' in core.normalizeSettings({ panelCollapsed: null }), false);
+        assert.equal('panelCollapsed' in core.normalizeSettings({ panelCollapsed: 'x' }), false);
+    });
+
+    test('isStoreOn: on overall and not turned off for that store', () => {
+        const settings = core.normalizeSettings({ disabledStores: ['wulfgaming'] });
+        assert.equal(core.isStoreOn(settings, 'gglehi'), true);
+        assert.equal(core.isStoreOn(settings, 'wulfgaming'), false);
+        assert.equal(core.isStoreOn({ ...settings, enabled: false }, 'gglehi'), false);
+        assert.equal(core.isStoreOn(null, 'gglehi'), false);
     });
 
     test('panelCollapsed: nothing chosen is undefined, not false, and a choice is kept', () => {
@@ -1029,6 +1089,60 @@ describe('shapeOwn and settings', () => {
         assert.equal(core.isPanelCollapsed({ panelCollapsed: null }, 800), true);
         assert.equal(core.isPanelCollapsed({ panelCollapsed: 'x' }, 1440), false);
         assert.equal(core.isPanelCollapsed(null, 800), true);
+    });
+});
+
+describe('panel position', () => {
+    const view = { width: 1440, height: 900 };
+    const size = { width: 432, height: 600 };
+
+    test('panelAnchor: where it was dropped on this store, else the corner of the options', () => {
+        const settings = core.normalizeSettings({ panelCorner: 'top-right', panelPositions: { gglehi: { h: 'left', x: 300, v: 'top', y: 50 } } });
+        assert.deepEqual(core.panelAnchor(settings, 'gglehi'), { h: 'left', x: 300, v: 'top', y: 50 });
+        assert.deepEqual(core.panelAnchor(settings, 'tcgplayer'), { h: 'right', x: 16, v: 'top', y: 16 });
+        assert.deepEqual(core.panelAnchor(core.normalizeSettings(null), 'tcgplayer'), { h: 'left', x: 16, v: 'bottom', y: 16 });
+    });
+
+    test('placeFromAnchor: each corner, measured from its own edges', () => {
+        assert.deepEqual(core.placeFromAnchor({ h: 'left', x: 16, v: 'bottom', y: 16 }, size, view), { left: 16, top: 284 });
+        assert.deepEqual(core.placeFromAnchor({ h: 'right', x: 16, v: 'top', y: 16 }, size, view), { left: 992, top: 16 });
+        assert.deepEqual(core.placeFromAnchor({ h: 'right', x: 40, v: 'bottom', y: 30 }, size, view), { left: 968, top: 270 });
+    });
+
+    test('placeFromAnchor: always inside the window, 8 px from the edge', () => {
+        // Dropped far right on a wide window, opened on a narrow one.
+        assert.deepEqual(core.placeFromAnchor({ h: 'left', x: 1300, v: 'top', y: 700 }, size, view), { left: 1000, top: 292 });
+        // Taller than the window: stuck to the top, where the head is.
+        assert.deepEqual(core.placeFromAnchor({ h: 'left', x: 16, v: 'bottom', y: 16 }, { width: 432, height: 1200 }, view), { left: 16, top: 8 });
+        // Not an anchor: the default corner.
+        assert.deepEqual(core.placeFromAnchor(null, size, view), { left: 16, top: 284 });
+    });
+
+    test('anchorFromRect: held from the nearest side and end, and back to the same place', () => {
+        const rect = { left: 980, top: 40, width: 432, height: 600 };
+        const anchor = core.anchorFromRect(rect, view);
+        assert.deepEqual(anchor, { h: 'right', x: 28, v: 'top', y: 40 });
+        assert.deepEqual(core.placeFromAnchor(anchor, size, view), { left: 980, top: 40 });
+        assert.deepEqual(core.anchorFromRect({ left: 20, top: 280, width: 432, height: 600 }, view), { h: 'left', x: 20, v: 'bottom', y: 20 });
+    });
+
+    test('anchorFromRect: a panel held from the right keeps its distance when the window narrows', () => {
+        const anchor = core.anchorFromRect({ left: 980, top: 40, width: 432, height: 600 }, view);
+        assert.deepEqual(core.placeFromAnchor(anchor, size, { width: 1100, height: 700 }), { left: 640, top: 40 });
+    });
+});
+
+describe('badgeFor', () => {
+    test('cards to buy, nothing at zero, and a cap', () => {
+        assert.deepEqual(core.badgeFor({ buy: 3, auth: true }), { text: '3', kind: 'buy' });
+        assert.deepEqual(core.badgeFor({ buy: 0, auth: true }), { text: '', kind: null });
+        assert.deepEqual(core.badgeFor({ buy: 140 }), { text: '99+', kind: 'buy' });
+    });
+
+    test('no session wins over the count, and off is empty', () => {
+        assert.deepEqual(core.badgeFor({ buy: 3, auth: false }), { text: '!', kind: 'login' });
+        assert.deepEqual(core.badgeFor({ buy: 3, auth: false, on: false }), { text: '', kind: null });
+        assert.deepEqual(core.badgeFor(), { text: '', kind: null });
     });
 });
 
@@ -3199,6 +3313,143 @@ describe('shop-data: never throws to the page', () => {
     });
 });
 
+// ─── the toolbar button ──────────────────────────────────────────────────────
+
+describe('shop-data: the toolbar button', () => {
+    /** A worker whose chrome also has action, commands and tabs.onUpdated, recording each call. */
+    function bootWithToolbar(world) {
+        const listeners = [];
+        const calls = [];
+        const hooks = {};
+        const sandbox = sandboxFor(world, listeners);
+        const record = (name) => async (arg) => {
+            calls.push([name, clone(arg)]);
+        };
+        sandbox.chrome.action = {
+            setIcon: record('setIcon'),
+            setBadgeText: record('setBadgeText'),
+            setBadgeBackgroundColor: record('setBadgeBackgroundColor'),
+            setBadgeTextColor: record('setBadgeTextColor'),
+            setTitle: record('setTitle'),
+        };
+        sandbox.chrome.commands = { onCommand: { addListener: (fn) => (hooks.command = fn) } };
+        sandbox.chrome.tabs.onUpdated = { addListener: (fn) => (hooks.tabUpdated = fn) };
+        const query = sandbox.chrome.tabs.query;
+        sandbox.chrome.tabs.query = async (filter) => (filter.active ? world.tabs.filter((tab) => tab.active) : query(filter));
+        sandbox.chrome.runtime.openOptionsPage = async () => calls.push(['openOptionsPage']);
+        const context = vm.createContext(sandbox);
+        vm.runInContext(read('scripts/lib/shop-core.js'), context, { filename: 'shop-core.js' });
+        vm.runInContext(read('scripts/lib/shop-data.js'), context, { filename: 'shop-data.js' });
+        const listener = listeners[0];
+        return {
+            calls,
+            hooks,
+            send: (message, sender = {}) => new Promise((resolve) => listener(clone(message), sender, (answer) => resolve(clone(answer)))),
+        };
+    }
+
+    const TAB = { tab: { id: 9 } };
+
+    test('a badge goes to the tab that sent it, violet with ink text, and says what it counts', async () => {
+        const worker = bootWithToolbar(makeWorld({ onFetch: () => assert.fail('no fetch') }));
+        await flush();
+        worker.calls.length = 0;
+        const answer = await worker.send({ type: 'shop-badge', text: '3', kind: 'buy' }, TAB);
+        assert.equal(answer.ok, true);
+        assert.deepEqual(worker.calls, [
+            ['setBadgeText', { tabId: 9, text: '3' }],
+            ['setBadgeBackgroundColor', { tabId: 9, color: '#BA4EFF' }],
+            ['setBadgeTextColor', { tabId: 9, color: '#090611' }],
+            ['setTitle', { tabId: 9, title: 'PokeArgentum: 3 cartas para comprar en esta página' }],
+        ]);
+    });
+
+    test('no session is an amber "!", and an empty badge clears without colors', async () => {
+        const worker = bootWithToolbar(makeWorld({ onFetch: () => assert.fail('no fetch') }));
+        await flush();
+        worker.calls.length = 0;
+        await worker.send({ type: 'shop-badge', text: '!', kind: 'login' }, TAB);
+        assert.deepEqual(worker.calls[1], ['setBadgeBackgroundColor', { tabId: 9, color: '#B45309' }]);
+        worker.calls.length = 0;
+        await worker.send({ type: 'shop-badge', text: '', kind: null }, TAB);
+        assert.deepEqual(worker.calls, [
+            ['setBadgeText', { tabId: 9, text: '' }],
+            ['setTitle', { tabId: 9, title: 'PokeArgentum' }],
+        ]);
+    });
+
+    test('a badge from no tab (the popup) is ignored', async () => {
+        const worker = bootWithToolbar(makeWorld({ onFetch: () => assert.fail('no fetch') }));
+        await flush();
+        worker.calls.length = 0;
+        const answer = await worker.send({ type: 'shop-badge', text: '3', kind: 'buy' });
+        assert.equal(answer.ok, false);
+        assert.deepEqual(worker.calls, []);
+    });
+
+    test('the icon goes gray when the marks are off, at start and when the settings change', async () => {
+        const world = makeWorld({ storage: { 'shop:settings': { enabled: false } }, onFetch: () => assert.fail('no fetch') });
+        const worker = bootWithToolbar(world);
+        await flush();
+        assert.deepEqual(worker.calls.find(([name]) => name === 'setIcon'), ['setIcon', { path: { 16: '/icons/icon-off-16.png', 32: '/icons/icon-off-32.png' } }]);
+        worker.calls.length = 0;
+        world.storage['shop:settings'] = { enabled: true };
+        await worker.send({ type: 'shop-settings-changed' });
+        assert.deepEqual(worker.calls.find(([name]) => name === 'setIcon'), ['setIcon', { path: { 16: '/icons/icon-16.png', 32: '/icons/icon-32.png' } }]);
+    });
+
+    test('every icon path the worker sets exists', async () => {
+        const off = bootWithToolbar(makeWorld({ storage: { 'shop:settings': { enabled: false } }, onFetch: () => assert.fail('no fetch') }));
+        const on = bootWithToolbar(makeWorld({ storage: { 'shop:settings': { enabled: true } }, onFetch: () => assert.fail('no fetch') }));
+        await flush();
+        const paths = [...off.calls, ...on.calls].filter(([name]) => name === 'setIcon').flatMap(([, { path }]) => Object.values(path));
+        assert.equal(paths.length, 4);
+        for (const file of paths) assert.ok(existsSync(new URL(file.slice(1), root)), file);
+    });
+
+    test('shop-open-options opens the options page', async () => {
+        const worker = bootWithToolbar(makeWorld({ onFetch: () => assert.fail('no fetch') }));
+        await worker.send({ type: 'shop-open-options' }, TAB);
+        assert.ok(worker.calls.some(([name]) => name === 'openOptionsPage'));
+    });
+
+    test('the shortcut tells the active tab to toggle its panel, and nothing else does', async () => {
+        const world = makeWorld({ onFetch: () => assert.fail('no fetch') });
+        world.tabs.push({ id: 4, url: 'https://store.gglehi.com/products/x', active: true }, { id: 5, url: 'https://www.tcgplayer.com/product/1' });
+        const worker = bootWithToolbar(world);
+        await worker.hooks.command('toggle-panel');
+        await worker.hooks.command('something-else');
+        assert.deepEqual(world.tabMessages, [{ tabId: 4, message: { type: 'shop:toggle-panel' } }]);
+    });
+
+    test('leaving a store clears the tab badge; a store page is left to its content script', async () => {
+        const worker = bootWithToolbar(makeWorld({ onFetch: () => assert.fail('no fetch') }));
+        await flush();
+        worker.calls.length = 0;
+        worker.hooks.tabUpdated(9, { url: 'https://www.google.com/search?q=x' });
+        worker.hooks.tabUpdated(9, { url: 'https://store.gglehi.com/products/x' });
+        worker.hooks.tabUpdated(9, { status: 'complete' });
+        await flush();
+        assert.deepEqual(worker.calls, [
+            ['setBadgeText', { tabId: 9, text: '' }],
+            ['setTitle', { tabId: 9, title: 'PokeArgentum' }],
+        ]);
+    });
+
+    test('the manifest declares the shortcut the worker listens to, and the options page loads the core first', () => {
+        const manifest = JSON.parse(read('manifest.json'));
+        assert.ok(manifest.commands['toggle-panel']);
+        assert.equal(manifest.options_ui.page, 'options.html');
+        const options = read('options.html');
+        assert.ok(options.includes('scripts/lib/shop-core.js'));
+        assert.ok(options.indexOf('scripts/lib/shop-core.js') < options.indexOf('scripts/options.js'));
+    });
+
+    test('no text under 13px in the options page', () => {
+        for (const [, size] of read('options.html').matchAll(/font(?:-size)?:\s*(\d+)px/g)) assert.ok(Number(size) >= 13, size);
+    });
+});
+
 // ─── wiring ──────────────────────────────────────────────────────────────────
 
 describe('service-worker.js hook', () => {
@@ -3245,7 +3496,8 @@ describe('manifest.json', () => {
 
     // A missing css makes Chrome refuse the whole extension, ARCA and BringIt included.
     test('every referenced file exists', () => {
-        const files = [manifest.background.service_worker, manifest.action.default_popup, manifest.action.default_icon];
+        const icons = (value) => (typeof value === 'string' ? [value] : Object.values(value || {}));
+        const files = [manifest.background.service_worker, manifest.action.default_popup, manifest.options_ui.page, ...icons(manifest.action.default_icon), ...icons(manifest.icons)];
         for (const script of manifest.content_scripts) files.push(...(script.js || []), ...(script.css || []));
         assert.ok(files.includes('scripts/controllers/shop-marks.js'));
         assert.ok(files.includes('scripts/controllers/shop-marks.css'));
@@ -3363,7 +3615,7 @@ describe('popup', () => {
         });
         await flush();
         assert.equal(elements['shop-enabled'].checked, true);
-        assert.deepEqual(variants.map((v) => v.checked), [true, false, false]);
+        assert.deepEqual(variants.map((v) => v.checked), [false, false, true]);
         assert.equal(elements['shop-age'].textContent, 'todavía no hay datos');
         assert.equal(elements['shop-session'].textContent, 'sin sesión');
         assert.equal(elements['shop-login'].hidden, false);
@@ -3380,7 +3632,7 @@ describe('popup', () => {
         variants[2].checked = true;
         variants[2].fire('change');
         await flush();
-        assert.deepEqual(world.storage['shop:settings'], { enabled: true, variant: 'c', dimOwned: false, panelOpen: true });
+        assert.deepEqual(world.storage['shop:settings'], { ...DEFAULTS, enabled: true, variant: 'c', dimOwned: false, panelOpen: true });
 
         elements['shop-dim-owned'].checked = true;
         elements['shop-dim-owned'].fire('change');
@@ -3388,7 +3640,7 @@ describe('popup', () => {
         elements['shop-enabled'].checked = false;
         elements['shop-enabled'].fire('change');
         await flush();
-        assert.deepEqual(world.storage['shop:settings'], { enabled: false, variant: 'c', dimOwned: true, panelOpen: true });
+        assert.deepEqual(world.storage['shop:settings'], { ...DEFAULTS, enabled: false, variant: 'c', dimOwned: true, panelOpen: true });
     });
 
     test('panelCollapsed: saving a setting does not invent one, and keeps one that was chosen', async () => {

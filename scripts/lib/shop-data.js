@@ -616,8 +616,97 @@
     }
 
     async function handleSettingsChanged() {
-        await tellTabs('settings');
+        await Promise.all([tellTabs('settings'), syncActionIcon()]);
         return { ok: true };
+    }
+
+    // ─── the toolbar button ───────────────────────────────────────────────────
+
+    const ICON_ON = { 16: '/icons/icon-16.png', 32: '/icons/icon-32.png' };
+    const ICON_OFF = { 16: '/icons/icon-off-16.png', 32: '/icons/icon-off-32.png' };
+    const BADGE_STYLE = {
+        buy: { background: '#BA4EFF', text: '#090611' },
+        login: { background: '#B45309', text: '#FFFFFF' },
+    };
+    const ACTION_TITLE = 'PokeArgentum';
+
+    /** Gray while the marks are off, so it shows without opening anything. */
+    async function syncActionIcon() {
+        if (!chrome.action?.setIcon) return;
+        const got = await storage.get(core.SETTINGS_KEY);
+        const on = core.normalizeSettings(got[core.SETTINGS_KEY]).enabled;
+        try {
+            await chrome.action.setIcon({ path: on ? ICON_ON : ICON_OFF });
+        } catch (err) {
+            console.warn('[shop-data] setIcon', err);
+        }
+    }
+
+    /** What the tab's content script counted: cards to buy on the page, or "!" with no session. */
+    async function handleBadge(message, sender) {
+        const tabId = sender?.tab?.id;
+        if (typeof tabId !== 'number' || !chrome.action?.setBadgeText) return { ok: false };
+        const text = typeof message.text === 'string' ? message.text.slice(0, 4) : '';
+        const style = BADGE_STYLE[message.kind] || BADGE_STYLE.buy;
+        try {
+            await chrome.action.setBadgeText({ tabId, text });
+            if (text) {
+                await chrome.action.setBadgeBackgroundColor({ tabId, color: style.background });
+                await chrome.action.setBadgeTextColor?.({ tabId, color: style.text });
+            }
+            const title =
+                message.kind === 'login'
+                    ? `${ACTION_TITLE}: entrá al admin para ver tus datos`
+                    : text
+                      ? `${ACTION_TITLE}: ${text} ${text === '1' ? 'carta' : 'cartas'} para comprar en esta página`
+                      : ACTION_TITLE;
+            await chrome.action.setTitle({ tabId, title });
+        } catch (err) {
+            // the tab can be gone by now
+        }
+        return { ok: true };
+    }
+
+    async function handleOpenOptions() {
+        try {
+            await chrome.runtime.openOptionsPage();
+        } catch (err) {
+            console.warn('[shop-data] openOptionsPage', err);
+        }
+        return { ok: true };
+    }
+
+    /** The shortcut of the manifest (`toggle-panel`): to the active tab, if it is a store. */
+    async function onCommand(command) {
+        if (command !== 'toggle-panel') return;
+        try {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tab?.id !== undefined) await chrome.tabs.sendMessage(tab.id, { type: 'shop:toggle-panel' });
+        } catch {
+            // not a store tab: nothing listens there
+        }
+    }
+
+    /** A tab-specific badge outlives a navigation: leaving the store, it goes. A store's own page repaints it. */
+    function onTabUpdated(tabId, info) {
+        if (!info?.url || !chrome.action?.setBadgeText) return;
+        let host = '';
+        try {
+            host = new URL(info.url).hostname;
+        } catch {
+            // about:blank and the like
+        }
+        if (core.storeFromHost(host)) return;
+        chrome.action.setBadgeText({ tabId, text: '' }).catch(() => {});
+        chrome.action.setTitle({ tabId, title: ACTION_TITLE }).catch(() => {});
+    }
+
+    try {
+        chrome.commands?.onCommand?.addListener(onCommand);
+        chrome.tabs?.onUpdated?.addListener(onTabUpdated);
+        syncActionIcon().catch(() => {});
+    } catch (err) {
+        console.warn('[shop-data] toolbar', err);
     }
 
     const HANDLERS = new Map([
@@ -625,13 +714,15 @@
         ['shop-status', handleStatus],
         ['shop-refresh', handleRefresh],
         ['shop-settings-changed', handleSettingsChanged],
+        ['shop-badge', handleBadge],
+        ['shop-open-options', handleOpenOptions],
     ]);
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const handler = HANDLERS.get(message?.type);
         if (!handler) return false;
         syncCacheBase()
-            .then(() => handler(message))
+            .then(() => handler(message, sender))
             .then(sendResponse)
             .catch((err) => {
                 console.warn('[shop-data]', message.type, err);

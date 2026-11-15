@@ -1,11 +1,31 @@
 {
   "manifest_version": 3,
   "name": "PokeArgentum Extension",
-  "description": "Extensión para PokeArgentum",
-  "version": "0.0.1",
+  "description": "Herramientas de PokeArgentum: qué tenés en las tiendas donde comprás, envíos, facturación y MercadoLibre.",
+  "version": "0.1.0",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "action": {
     "default_popup": "pokeargentum.html",
-    "default_icon": "src/img/lapras.webp"
+    "default_title": "PokeArgentum",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "commands": {
+    "toggle-panel": {
+      "suggested_key": { "default": "Alt+Shift+P" },
+      "description": "Mostrar u ocultar el panel de la carta en una tienda"
+    }
   },
   "permissions": ["storage", "unlimitedStorage", "tabs", "activeTab", "scripting", "webRequest", "downloads"],
   "host_permissions": ["https://www.pokellector.com/*", "https://fe.afip.gob.ar/*", "https://www.correoargentino.com.ar/*", "https://cartas.konekotekka.com.ar/*", "http://localhost:3000/*"],

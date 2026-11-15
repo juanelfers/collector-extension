@@ -29,7 +29,23 @@
     ];
 
     const SETTINGS_KEY = 'shop:settings';
-    const DEFAULT_SETTINGS = { enabled: true, variant: 'a', dimOwned: false };
+    // Juan chose "Decisión" (c) on 2026-11-05. A saved variant still wins.
+    const DEFAULT_SETTINGS = {
+        enabled: true,
+        variant: 'c',
+        dimOwned: false,
+        disabledStores: [],
+        panelEnabled: true,
+        panelCorner: 'bottom-left',
+        panelSize: 'normal',
+        panelPositions: {},
+        badge: true,
+    };
+    const PANEL_CORNERS = ['bottom-left', 'bottom-right', 'top-left', 'top-right'];
+    const PANEL_SIZES = ['normal', 'large'];
+    // Distance from the window's edge: of the corner, and the least a dragged panel keeps.
+    const PANEL_INSET = 16;
+    const PANEL_EDGE = 8;
     const DEFAULT_ADMIN_BASE = 'https://cartas.konekotekka.com.ar';
     // Older own data is treated as absent: a stock count this old must not read as today's.
     const OWN_MAX_AGE_MS = 48 * 60 * 60 * 1000;
@@ -583,12 +599,95 @@
         return typeof saved === 'boolean' ? saved : windowWidth < PANEL_OPEN_MIN_WIDTH;
     }
 
+    const STORE_KEYS = new Set(STORES.map((s) => s.key));
+    const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+    /** `{ h: 'left' | 'right', x, v: 'top' | 'bottom', y }`, distances in px from those edges. null if it is not one. */
+    function cleanAnchor(anchor) {
+        if (!isPlainObject(anchor)) return null;
+        const x = toNum(anchor.x);
+        const y = toNum(anchor.y);
+        if (!['left', 'right'].includes(anchor.h) || !['top', 'bottom'].includes(anchor.v)) return null;
+        if (x === null || y === null || x < 0 || y < 0) return null;
+        return { h: anchor.h, x: Math.round(x), v: anchor.v, y: Math.round(y) };
+    }
+
     function normalizeSettings(saved) {
-        const merged = { ...DEFAULT_SETTINGS, ...(saved && typeof saved === 'object' ? saved : {}) };
+        const merged = { ...DEFAULT_SETTINGS, ...(isPlainObject(saved) ? saved : {}) };
         merged.enabled = merged.enabled !== false;
         merged.dimOwned = merged.dimOwned === true;
+        merged.panelEnabled = merged.panelEnabled !== false;
+        merged.badge = merged.badge !== false;
         if (!['a', 'b', 'c'].includes(merged.variant)) merged.variant = DEFAULT_SETTINGS.variant;
+        if (!PANEL_CORNERS.includes(merged.panelCorner)) merged.panelCorner = DEFAULT_SETTINGS.panelCorner;
+        if (!PANEL_SIZES.includes(merged.panelSize)) merged.panelSize = DEFAULT_SETTINGS.panelSize;
+        merged.disabledStores = Array.isArray(merged.disabledStores)
+            ? [...new Set(merged.disabledStores.filter((key) => STORE_KEYS.has(key)))]
+            : [];
+        const positions = {};
+        if (isPlainObject(merged.panelPositions)) {
+            for (const [key, anchor] of Object.entries(merged.panelPositions)) {
+                const clean = STORE_KEYS.has(key) ? cleanAnchor(anchor) : null;
+                if (clean) positions[key] = clean;
+            }
+        }
+        merged.panelPositions = positions;
+        // Not chosen is absent, never false: the window decides then (isPanelCollapsed).
+        if (typeof merged.panelCollapsed !== 'boolean') delete merged.panelCollapsed;
         return merged;
+    }
+
+    /** Marks on this store: on overall and not turned off for it. */
+    function isStoreOn(settings, storeKey) {
+        return Boolean(settings?.enabled) && !(settings.disabledStores || []).includes(storeKey);
+    }
+
+    /** Where the panel goes on this store: where it was dropped, else the chosen corner. */
+    function panelAnchor(settings, storeKey) {
+        const dropped = cleanAnchor(settings?.panelPositions?.[storeKey]);
+        if (dropped) return dropped;
+        const corner = PANEL_CORNERS.includes(settings?.panelCorner) ? settings.panelCorner : DEFAULT_SETTINGS.panelCorner;
+        const [v, h] = corner.split('-');
+        return { h, x: PANEL_INSET, v, y: PANEL_INSET };
+    }
+
+    const clamp = (n, min, max) => Math.min(Math.max(n, min), Math.max(min, max));
+
+    /**
+     * Top left corner of a panel of `size` held by `anchor` in a `viewport`, always inside it.
+     * A panel held from the bottom grows upwards when it opens, one held from the top downwards.
+     */
+    function placeFromAnchor(anchor, size, viewport) {
+        const a = cleanAnchor(anchor) || { h: 'left', x: PANEL_INSET, v: 'bottom', y: PANEL_INSET };
+        const left = a.h === 'left' ? a.x : viewport.width - a.x - size.width;
+        const top = a.v === 'top' ? a.y : viewport.height - a.y - size.height;
+        return {
+            left: Math.round(clamp(left, PANEL_EDGE, viewport.width - size.width - PANEL_EDGE)),
+            top: Math.round(clamp(top, PANEL_EDGE, viewport.height - size.height - PANEL_EDGE)),
+        };
+    }
+
+    /** Where a panel was dropped, held from the nearest side and the nearest end. */
+    function anchorFromRect(rect, viewport) {
+        const left = Math.max(0, rect.left);
+        const right = Math.max(0, viewport.width - rect.left - rect.width);
+        const top = Math.max(0, rect.top);
+        const bottom = Math.max(0, viewport.height - rect.top - rect.height);
+        return {
+            h: left <= right ? 'left' : 'right',
+            x: Math.round(left <= right ? left : right),
+            v: top <= bottom ? 'top' : 'bottom',
+            y: Math.round(top <= bottom ? top : bottom),
+        };
+    }
+
+    /** What the toolbar badge says for a page: cards to buy, or that the session is gone. */
+    function badgeFor({ buy = 0, auth = null, on = true } = {}) {
+        if (!on) return { text: '', kind: null };
+        if (auth === false) return { text: '!', kind: 'login' };
+        const n = positive(buy);
+        if (!n) return { text: '', kind: null };
+        return { text: n > 99 ? '99+' : String(n), kind: 'buy' };
     }
 
     globalThis.PAShopCore = {
@@ -606,6 +705,15 @@
         missingPrintingText,
         isPanelCollapsed,
         normalizeSettings,
+        PANEL_CORNERS,
+        PANEL_SIZES,
+        PANEL_INSET,
+        PANEL_EDGE,
+        isStoreOn,
+        panelAnchor,
+        placeFromAnchor,
+        anchorFromRect,
+        badgeFor,
         formatUsd,
         formatPct,
         formatDate,
